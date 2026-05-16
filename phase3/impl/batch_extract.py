@@ -9,8 +9,8 @@ sys.path.insert(0, PROJECT_ROOT)
 from impl import extract_l1_facts, store_l1_batch, save_l0_raw, try_aggregate_l2
 from datetime import datetime
 
-DB = '/Users/oliver/.hermes/state.db'
-OUT_DB = '/Users/oliver/.hermes/memory/l0_l3.db'
+DB = os.environ.get("HERMES_STATE_DB", str(Path.home() / ".hermes" / "state.db"))
+OUT_DB = os.environ.get("HERMEM_DB", str(Path.home() / ".hermes" / "memory" / "l0_l3.db"))
 
 def build_session_summary(conn, session_id: str) -> str:
     """从 messages 表聚合单个会话的文本内容"""
