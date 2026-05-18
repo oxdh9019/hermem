@@ -41,6 +41,7 @@ def process_session(
     返回:
         dict，含各步骤状态和结果统计
     """
+    import time  # noqa: F401 (reserved for future duration tracking)
     stats = {}
 
     # 1. L0 保存
@@ -51,7 +52,7 @@ def process_session(
     facts = extract_l1_facts(session_summary)
     stats["facts_extracted"] = len(facts)
     if not facts:
-        print("  [Phase3] no facts extracted, skipping L1/L2")
+        # 无 facts 时也保存了 L0，但跳过后续阶段
         return stats
 
     # 3. L1 写入数据库
@@ -68,6 +69,17 @@ def process_session(
     # 6. L3 staging 触发检查
     staging_result = process_l3_staging()
     stats["staging"] = staging_result
+
+    # 7. Error annotation（异步，不阻塞主流程）
+    #    使用 enqueue 而非同步调用，避免 LLM 延迟阻塞用户响应
+    from .async_annotation import enqueue_annotation
+    qsize = enqueue_annotation(
+        session_id=session_id,
+        session_summary=session_summary,
+        l1_facts=facts,
+    )
+    stats["annotation_queued"] = True
+    stats["annotation_queue_depth"] = qsize
 
     return stats
 

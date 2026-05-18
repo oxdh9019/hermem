@@ -1,8 +1,16 @@
 # Hermem
 
-Hermes lightweight memory enhancement system — L0–L3 hierarchical memory for AI assistants.
+Hermes lightweight memory enhancement system — L0–L3 hierarchical memory with Predictive Coding (V4).
 
-> **Project status (2026-05-16): Phase 3 is the active deliverable. Phase 1/2 are skill-layer designs with no plugin implementation. See Caveats below.**
+## Version History
+
+| Version | Name | Description |
+|---------|------|-------------|
+| V1–V3 | Phase 1–3 | L0→L1→L2→L3 pipeline, semantic search |
+| **V4** | **Predictive Memory** | Phase 4 — memory as generative model, not stored text |
+| **V4.1** | **Error Annotation** | Predict what should happen; tag prediction errors when they don't |
+
+> **V4.1 (Error Annotation) is active.** Run `python phase3/impl/verify_annotation.py` to check signal quality after a few days of data accumulation.
 
 ## What Hermem Actually Does
 
@@ -19,6 +27,35 @@ L3: Staging → user_profile.md confirmation
 ```
 
 Current data: **316 L1 facts, 41 L2 scenes, 0 L3** (as of 2026-05-16).
+
+## Phase 4 — Predictive Memory (V4)
+
+V4 rethinks memory as a **generative model** rather than stored text. Instead of retrieving facts and hoping they are relevant, Hermem predicts what the user needs based on context, then activates only when the prediction is violated — the error signal is what drives learning.
+
+```
+Context → Predict what should happen → Compare to what actually happens
+                                                    ↓
+                                          Error signal → Update model
+```
+
+### V4.1 — Error Annotation (active)
+
+After each session, annotate L0 with prediction errors the assistant made:
+- `prediction_errors[]`: falsifiable predictions that were violated
+- `surprise_level`: how unexpected this session was
+- `confidence`: per-error certainty (0–1)
+- `overall_quality_score`: session-level prediction quality (0–1)
+
+Annotation runs **asynchronously** (background queue, does not block session processing).
+Run `python phase3/impl/verify_annotation.py` to audit signal quality.
+
+### V4.2 — Conditioned Dispositions (planned)
+
+Replace propositional L1 facts with: `(condition, prediction, confidence, error_history)`.
+
+### V4.3 — Error-Activated Retrieval (planned)
+
+Instead of similarity-based retrieval, activate memories where similar predictions have historically failed.
 
 ## Requirements
 
@@ -83,6 +120,8 @@ hermem/
 | Phase 1/2 skill layer | ✅ `skills/hermem/` (session-summary, memory-warmup, memory-tools) — real, loaded in Hermes |
 | Phase 1/2 plugin layer (`plugins/memory/hermem/`) | ❌ Empty — `memory.provider: hermem` in config points to non-existent plugin |
 | Phase 3 `plugins/memory/hermem/` | ❌ Same — plugin not registered; Hermem works via skill + cron, not as a memory provider |
+| V4.1 Error Annotation | ✅ Implemented — async queue + V3 prompt, awaiting data accumulation |
+| V4.2 / V4.3 | ❌ Design only, not implemented |
 | Unit tests | ❌ None — smoke-test only |
 | CI/CD | ❌ None |
 | Community stars | 0 — personal project, no external users |

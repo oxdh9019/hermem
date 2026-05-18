@@ -26,7 +26,89 @@ SCENE_DORMANT_DAYS  = 60
 # ── L3 Staging 阈值 ─────────────────────────────────────────
 STAGING_CONFIRM_THRESHOLD = 5   # 满 5 条推一次确认
 
-# ── L1 提取 Prompt ─────────────────────────────────────────
+# ── Error Annotation ─────────────────────────────────────────
+ERROR_ANNOTATION_MODEL = "qwen2.5:3b"   # 可切换到 qwen3.5:9b-q4_K_M 做对比实验
+
+ERROR_ANNOTATION_PROMPT = """你是一个严格的预测误差审计系统。请基于**对话原文中的明确内容**，逐条识别助手（Hermes）作出的**可被证伪的预测或隐含假设**，并与实际结果对比。
+
+对话摘要：
+{SESSION_SUMMARY}
+
+助手提取的原子事实：
+{L1_FACTS}
+
+### 预测的定义（必须同时满足）
+1. 它必须是对话中**可以明确表述出来的预期**（如"我认为用户会同意X"、"方案A应该在步骤B之后"）。
+2. 它必须**在后续对话中被明确事实推翻**，或用户明确纠正。
+3. 如果只是"我猜可能"，但没有被否定，不记录为误差。
+
+### 误差类型（从以下枚举选择）
+- `design_decision_error`：设计顺序、架构选择、实现方案被纠正
+- `factual_misunderstanding`：对事实、用户状态、外部信息的错误理解
+- `timing_misprediction`：对事件发生顺序或时间的预测错误
+- `topic_shift_unexpected`：用户突然切换话题或引入新信息源
+- `preference_misjudgment`：对用户偏好、态度的错误判断
+- `other`
+
+### 输出格式（严格JSON，不要markdown包裹）
+{{
+  "prediction_errors": [
+    {{
+      "model_prediction": "一句话描述预测，必须引用对话中的原意",
+      "actual_outcome": "实际发生的事，必须引用对话中的证据",
+      "error_type": "从上面列表选择",
+      "severity": "high|medium|low",
+      "confidence": 0.95
+    }}
+  ],
+  "surprise_level": "high|medium|low",
+  "meta_prediction": "一句话总结整体预测质量",
+  "overall_quality_score": 0.85
+}}
+
+### 新增字段说明
+- `confidence`（0-1）：你对这条误差判断的确信程度。
+  1表示完全确定（对话中有直接矛盾证据），
+  0.5表示需要推断但有间接证据，
+  低于0.6不建议输出（直接省略该条）。
+- `overall_quality_score`（0-1）：整场对话预测质量的自我评分。
+  1表示所有预测都正确，0表示全部错误。
+
+### 重要规则
+- 不要构造内部叙事。只写对话中**明确出现**的内容。
+- 如果同一对话中有多个预测误差，每条都要列出。
+- 如果没有预测误差，输出空数组，但需要给出 `overall_quality_score` 和 `meta_prediction`。
+- **自检步骤**：检查每条 `model_prediction` 与 `actual_outcome` 是否构成真实矛盾。如果两者本质一致（只是措辞不同），删除该条。
+- 不确定时，不要编造。
+
+### 示例（正确格式）
+对话片段：
+助手：我建议把 annotation 放在 L1 提取之前。
+用户：不对，应该放在 L1 之后。
+
+输出：
+{{
+  "prediction_errors": [
+    {{
+      "model_prediction": "annotation 应该在 L1 之前",
+      "actual_outcome": "用户纠正为 L1 之后",
+      "error_type": "design_decision_error",
+      "severity": "high",
+      "confidence": 1.0
+    }}
+  ],
+  "surprise_level": "high",
+  "meta_prediction": "在设计顺序上犯了错误",
+  "overall_quality_score": 0.3
+}}
+
+### 错误示例（不要这样做）
+{{
+  "model_prediction": "助手认为 L1 之后是对的，但实际用户认为 L1 之前",
+  ...
+}}
+"""
+
 L1_EXTRACT_PROMPT = """你是一个记忆分析器。从以下会话摘要中提取所有有价值的原子事实。
 
 会话摘要：
@@ -48,10 +130,10 @@ L1_EXTRACT_PROMPT = """你是一个记忆分析器。从以下会话摘要中提
 
 示例：
 
-输入摘要：讨论了 SQLite FTS5 中文分词问题。用户尝试了 unicode61、trigram、porter 等 tokenizers，全部失败。最终决定用 Python 2-gram 滑动窗口提取关键词，绕过 SQLite 侧的分词限制。
+输入摘要：讨论了 SQLite FTS5 中文分词问题。Oliver 尝试了 unicode61、trigram、porter 等 tokenizers，全部失败。最终决定用 Python 2-gram 滑动窗口提取关键词，绕过 SQLite 侧的分词限制。
 
 输出：
 {{"facts": [
-  {{"types": ["bug-fix", "unresolved"], "content": "用户尝试了 SQLite 的 unicode61、trigram、porter 等分词器，全部失败，中文搜索无法正常工作", "tags": ["sqlite", "chinese-search", "分词"], "value": "high"}},
-  {{"types": ["decision", "method"], "content": "用户决定使用 Python 2-gram 滑动窗口提取关键词来绕过 SQLite 的分词限制", "tags": ["sqlite", "chinese-search", "python"], "value": "high"}}
+  {{"types": ["bug-fix", "unresolved"], "content": "Oliver 尝试了 SQLite 的 unicode61、trigram、porter 等分词器，全部失败，中文搜索无法正常工作", "tags": ["sqlite", "chinese-search", "分词"], "value": "high"}},
+  {{"types": ["decision", "method"], "content": "Oliver 决定使用 Python 2-gram 滑动窗口提取关键词来绕过 SQLite 的分词限制", "tags": ["sqlite", "chinese-search", "python"], "value": "high"}}
 ]}}"""
