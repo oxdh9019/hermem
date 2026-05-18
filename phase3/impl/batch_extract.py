@@ -4,7 +4,8 @@
 """
 import sys, os, time, sqlite3, json, random
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, PROJECT_ROOT + "/phase3")  # 显式指向 phase3/impl/ 而非 legacy impl/
+os.chdir(PROJECT_ROOT + "/phase3")
 
 from impl import extract_l1_facts, store_l1_batch, save_l0_raw, try_aggregate_l2
 from datetime import datetime
