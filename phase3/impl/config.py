@@ -90,10 +90,11 @@ ERROR_ANNOTATION_PROMPT = """你是一个严格的预测误差审计系统。请
 - 不确定时，不要编造。
 
 ### 示例（正确格式）
+
+**示例1：design_decision_error（正例）**
 对话片段：
 助手：我建议把 annotation 放在 L1 提取之前。
 用户：不对，应该放在 L1 之后。
-
 输出：
 {{
   "prediction_errors": [
@@ -110,11 +111,139 @@ ERROR_ANNOTATION_PROMPT = """你是一个严格的预测误差审计系统。请
   "overall_quality_score": 0.3
 }}
 
-### 错误示例（不要这样做）
+**示例2：factual_misunderstanding（正例）**
+对话片段：
+助手：已为你创建了微博监控任务，每4小时执行。
+用户：我没有要求你创建任务，我只是问会不会占用配额。
+输出：
 {{
-  "model_prediction": "助手认为 L1 之后是对的，但实际用户认为 L1 之前",
-  ...
+  "prediction_errors": [
+    {{
+      "model_prediction": "用户同意了创建监控任务",
+      "actual_outcome": "用户只是询问配额，未同意创建",
+      "error_type": "factual_misunderstanding",
+      "severity": "high",
+      "confidence": 1.0
+    }}
+  ],
+  "surprise_level": "high",
+  "meta_prediction": "将询问误认为授权",
+  "overall_quality_score": 0.2
 }}
+
+**示例3：preference_misjudgment（正例）**
+对话片段：
+助手：我觉得用方案B更好，结构更清晰。
+用户：其实我更在意执行速度，结构清晰度是次要的。
+输出：
+{{
+  "prediction_errors": [
+    {{
+      "model_prediction": "用户优先考虑结构清晰度",
+      "actual_outcome": "用户实际优先考虑执行速度",
+      "error_type": "preference_misjudgment",
+      "severity": "medium",
+      "confidence": 0.9
+    }}
+  ],
+  "surprise_level": "medium",
+  "meta_prediction": "错误估计了用户的优先级",
+  "overall_quality_score": 0.4
+}}
+
+**示例4：timing_misprediction（正例）**
+对话片段：
+助手：等配置完成后再启动定时任务。
+用户：先启动，再慢慢调配置也行。
+输出：
+{{
+  "prediction_errors": [
+    {{
+      "model_prediction": "配置必须在启动前完成",
+      "actual_outcome": "用户接受先启动后配置",
+      "error_type": "timing_misprediction",
+      "severity": "low",
+      "confidence": 0.85
+    }}
+  ],
+  "surprise_level": "low",
+  "meta_prediction": "过度保守的时序假设",
+  "overall_quality_score": 0.6
+}}
+
+**示例5：topic_shift_unexpected（正例）**
+对话片段：
+助手：关于 Hermem V4.2 的 Disposition 更新，我已经提交了 PR。
+用户：对了，之前说的 B9 现在到什么程度了？
+输出：
+{{
+  "prediction_errors": [
+    {{
+      "model_prediction": "对话会继续在 Hermem PR 话题上",
+      "actual_outcome": "用户切换到 B9 进度话题",
+      "error_type": "topic_shift_unexpected",
+      "severity": "medium",
+      "confidence": 0.9
+    }}
+  ],
+  "surprise_level": "medium",
+  "meta_prediction": "未预判到话题跳转",
+  "overall_quality_score": 0.5
+}}
+
+**示例6：反例——措辞不同但本质一致（不要记录）**
+对话片段：
+助手：方案A更简洁。
+用户：我觉得方案B其实也很好。
+输出：
+{{
+  "prediction_errors": [],
+  "surprise_level": "low",
+  "meta_prediction": "用户未否定方案A，两者都是正面评价",
+  "overall_quality_score": 0.8
+}}
+（解释：用户说"B也很好"不等于"A不好"，这不是矛盾，不记录为误差。）
+
+**示例7：反例——推断过度（不要记录）**
+对话片段：
+助手：已为你开启预取功能。
+用户：预取是什么意思？
+输出：
+{{
+  "prediction_errors": [],
+  "surprise_level": "low",
+  "meta_prediction": "用户只是询问概念，未表示不满",
+  "overall_quality_score": 0.75
+}}
+（解释：用户询问不等于不满，推断"用户对开启不满"超出原文证据。）
+
+**示例8：边界 case——低 confidence（可记录但不建议）**
+对话片段：
+助手：看起来你对这个方案比较犹豫。
+用户：也还好，就是在想有没有更好的替代方案。
+输出：
+{{
+  "prediction_errors": [
+    {{
+      "model_prediction": "用户对当前方案持保留态度",
+      "actual_outcome": "用户实际上在主动寻求优化",
+      "error_type": "preference_misjudgment",
+      "severity": "low",
+      "confidence": 0.65
+    }}
+  ],
+  "surprise_level": "low",
+  "meta_prediction": "轻微误判用户态度",
+  "overall_quality_score": 0.7
+}}
+（confidence=0.65 低于0.6阈值，本应省略，此处示范边界 case。）
+
+### 重要规则
+- **自检**：每条 prediction_errors 必须满足「model_prediction 与 actual_outcome 构成真实矛盾」才能输出
+- **措辞不同 ≠ 矛盾**：用户用不同方式表达相同意思是正常的，不记录
+- **推断过度 → 不记录**：从用户行为推断出对话中未明确表达的结论，需要直接证据
+- **低 confidence（<0.6）→ 不输出**：无法确定的情况不要制造记录
+- **无 error → 输出空数组**：对话顺利时输出空 prediction_errors，这是正常结果
 """
 
 L1_EXTRACT_PROMPT = """你是一个记忆分析器。从以下会话摘要中提取所有有价值的原子事实。
