@@ -23,6 +23,12 @@ SIM_THRESHOLD_JOIN  = 0.75   # 新 L1 归入现有 scene
 SIM_THRESHOLD_MERGE = 0.85   # 两个 scene 合并
 SCENE_DORMANT_DAYS  = 60
 
+# ── B6: Disposition 衰减机制 ───────────────────────────────
+DISPOSITION_HALF_LIFE_DAYS = 7    # 半衰期 7 天
+DISPOSITION_MIN_COUNT       = 2   # 至少 2 次错误才增强
+DISPOSITION_MAX_FACTOR      = 2.0  # 最高增强到 2 倍
+DISPOSITION_BASE_WEIGHT     = 1.0 # 中性起点
+
 # ── L3 Staging 阈值 ─────────────────────────────────────────
 STAGING_CONFIRM_THRESHOLD = 5   # 满 5 条推一次确认
 

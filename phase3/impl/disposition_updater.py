@@ -287,6 +287,105 @@ def _jaccard_sim(text1: str, text2: str) -> float:
     return max(word_sim, char_sim)
 
 
+# ── B6: Disposition 衰减机制 ──────────────────────────────────
+
+def compute_disposition_weight(
+    last_error_at: str | None,
+    error_count: int,
+    half_life_days: float = 7.0,
+    min_count: int = 2,
+    max_factor: float = 2.0,
+    base_weight: float = 1.0,
+) -> float:
+    """
+    计算 disposition 的激活权重。
+
+    公式：weight = base_weight * f_time * f_freq
+
+    f_time:  时间衰减因子，指数衰减，半衰期 half_life_days
+            从未触发（last_error_at IS NULL）→ f_time = 1.0
+    f_freq:  频次增强因子，error_count 越多越高
+            error_count=0 → 0.5（抑制）
+            error_count=1 → 1.0（中性）
+            error_count>=min_count → 逐步增强，上限 max_factor
+    """
+    # ── f_time: 时间衰减 ──
+    if last_error_at is None:
+        f_time = 1.0
+    else:
+        try:
+            last_dt = datetime.fromisoformat(last_error_at.replace("Z", "+00:00"))
+        except ValueError:
+            f_time = 1.0
+        else:
+            now = datetime.now(last_dt.tzinfo) if last_dt.tzinfo else datetime.now()
+            delta_days = (now - last_dt).total_seconds() / 86400.0
+            f_time = 0.5 ** (delta_days / half_life_days)
+
+    # ── f_freq: 频次增强 ──
+    if error_count == 0:
+        f_freq = 0.5
+    elif error_count == 1:
+        f_freq = 1.0
+    else:
+        f_freq = min(max_factor, 1.0 + (error_count - 1) * 0.2)
+
+    return base_weight * f_time * f_freq
+
+
+def update_disposition_weights(
+    half_life_days: float | None = None,
+) -> dict:
+    """
+    批量重新计算所有 active disposition 的权重，写入 l1_dispositions.weight。
+    用于定期 decay run 或 Gateway 启动时初始化。
+
+    Returns: {"updated": N, "weights": {id: weight, ...}}
+    """
+    from .config import (
+        DISPOSITION_HALF_LIFE_DAYS,
+        DISPOSITION_MIN_COUNT,
+        DISPOSITION_MAX_FACTOR,
+        DISPOSITION_BASE_WEIGHT,
+    )
+
+    half_life = half_life_days or DISPOSITION_HALF_LIFE_DAYS
+
+    db_path = Path(DB_PATH).expanduser()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT id, last_error_at, error_count FROM l1_dispositions WHERE is_active = 1"
+    )
+    rows = cursor.fetchall()
+
+    results = {}
+    updated = 0
+
+    for row in rows:
+        w = compute_disposition_weight(
+            last_error_at=row["last_error_at"],
+            error_count=row["error_count"],
+            half_life_days=half_life,
+            min_count=DISPOSITION_MIN_COUNT,
+            max_factor=DISPOSITION_MAX_FACTOR,
+            base_weight=DISPOSITION_BASE_WEIGHT,
+        )
+        cursor.execute(
+            "UPDATE l1_dispositions SET weight = ? WHERE id = ?",
+            (w, row["id"]),
+        )
+        if cursor.rowcount > 0:
+            updated += 1
+        results[row["id"]] = round(w, 4)
+
+    conn.commit()
+    conn.close()
+    return {"updated": updated, "weights": results}
+
+
 # ── 测试 ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

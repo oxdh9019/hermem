@@ -55,6 +55,9 @@ def vector_search_dispositions(
     语义搜索 l1_dispositions 表的 condition_text。
     与 vector_search_l1 并行工作，但针对行为模式检索。
 
+    B6: activation_score = semantic_similarity * disposition_weight
+         weight = base * f_time * f_freq（时间衰减 × 频次增强）
+
     Args:
         query_emb:       查询向量
         top_k:           返回数量
@@ -62,13 +65,22 @@ def vector_search_dispositions(
                          为 None 时不做 intent 过滤。
     """
     import sqlite3
+    from .disposition_updater import compute_disposition_weight
+    from .config import (
+        DISPOSITION_HALF_LIFE_DAYS,
+        DISPOSITION_MIN_COUNT,
+        DISPOSITION_MAX_FACTOR,
+        DISPOSITION_BASE_WEIGHT,
+    )
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
     if intent:
         rows = conn.execute(
             "SELECT id, condition_text, prediction_text, confidence, source_agent, "
-            "       condition_embedding, intent, scope "
+            "       condition_embedding, intent, scope, "
+            "       error_count, last_error_at, weight "
             "FROM l1_dispositions "
             "WHERE is_active = 1 AND intent = ?",
             (intent,),
@@ -76,7 +88,8 @@ def vector_search_dispositions(
     else:
         rows = conn.execute(
             "SELECT id, condition_text, prediction_text, confidence, source_agent, "
-            "       condition_embedding, intent, scope "
+            "       condition_embedding, intent, scope, "
+            "       error_count, last_error_at, weight "
             "FROM l1_dispositions WHERE is_active = 1 AND scope = 'model_error'"
         ).fetchall()
     conn.close()
@@ -88,18 +101,41 @@ def vector_search_dispositions(
             continue
         emb = deserialize_vec(emb_bytes)
         sim = cosine_sim(query_emb, emb)
+
+        # ── B6: 计算激活权重 ──
+        # 优先用预存的 weight，fallback 到实时计算
+        stored_weight = row["weight"]
+        if stored_weight is not None:
+            disp_weight = stored_weight
+        else:
+            disp_weight = compute_disposition_weight(
+                last_error_at=row["last_error_at"],
+                error_count=row["error_count"] or 0,
+                half_life_days=DISPOSITION_HALF_LIFE_DAYS,
+                min_count=DISPOSITION_MIN_COUNT,
+                max_factor=DISPOSITION_MAX_FACTOR,
+                base_weight=DISPOSITION_BASE_WEIGHT,
+            )
+
+        activation_score = sim * disp_weight
+
         results.append({
-            "id":           row["id"],
-            "condition":    row["condition_text"],
-            "prediction":   row["prediction_text"],
-            "confidence":   row["confidence"],
-            "source_agent": row["source_agent"],
-            "intent":       row["intent"] if "intent" in row.keys() else None,
-            "scope":        row["scope"] if "scope" in row.keys() else None,
-            "_sim":         sim,
+            "id":             row["id"],
+            "condition":      row["condition_text"],
+            "prediction":     row["prediction_text"],
+            "confidence":     row["confidence"],
+            "source_agent":   row["source_agent"],
+            "intent":         row["intent"] if "intent" in row.keys() else None,
+            "scope":          row["scope"] if "scope" in row.keys() else None,
+            "error_count":   row["error_count"] or 0,
+            "weight":         disp_weight,
+            "_sim":           sim,
+            "_weight":        disp_weight,
+            "_activation":    activation_score,
         })
 
-    results.sort(key=lambda x: x["_sim"], reverse=True)
+    # B6: 按 activation_score 排序，而非原始相似度
+    results.sort(key=lambda x: x["_activation"], reverse=True)
     return results[:top_k]
 
 
