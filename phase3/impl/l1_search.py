@@ -46,18 +46,39 @@ def vector_search_l1(query_emb, top_k: int = 20) -> list[dict]:
     return results[:top_k]
 
 
-def vector_search_dispositions(query_emb, top_k: int = 5) -> list[dict]:
+def vector_search_dispositions(
+    query_emb,
+    top_k: int = 5,
+    intent: str | None = None,
+) -> list[dict]:
     """
     语义搜索 l1_dispositions 表的 condition_text。
     与 vector_search_l1 并行工作，但针对行为模式检索。
+
+    Args:
+        query_emb:       查询向量
+        top_k:           返回数量
+        intent:          可选，按 intent 过滤（13种意图之一）。
+                         为 None 时不做 intent 过滤。
     """
     import sqlite3
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT id, condition_text, prediction_text, confidence, source_agent, condition_embedding "
-        "FROM l1_dispositions WHERE is_active = 1 AND scope = 'model_error'"
-    ).fetchall()
+
+    if intent:
+        rows = conn.execute(
+            "SELECT id, condition_text, prediction_text, confidence, source_agent, "
+            "       condition_embedding, intent, scope "
+            "FROM l1_dispositions "
+            "WHERE is_active = 1 AND intent = ?",
+            (intent,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, condition_text, prediction_text, confidence, source_agent, "
+            "       condition_embedding, intent, scope "
+            "FROM l1_dispositions WHERE is_active = 1 AND scope = 'model_error'"
+        ).fetchall()
     conn.close()
 
     results = []
@@ -73,6 +94,8 @@ def vector_search_dispositions(query_emb, top_k: int = 5) -> list[dict]:
             "prediction":   row["prediction_text"],
             "confidence":   row["confidence"],
             "source_agent": row["source_agent"],
+            "intent":       row["intent"] if "intent" in row.keys() else None,
+            "scope":        row["scope"] if "scope" in row.keys() else None,
             "_sim":         sim,
         })
 
@@ -80,33 +103,47 @@ def vector_search_dispositions(query_emb, top_k: int = 5) -> list[dict]:
     return results[:top_k]
 
 
-def retrieve(query: str, preferred_types: list[str] | None = None,
-             top_k: int = 5, disposition_k: int = 3) -> dict:
+def retrieve(
+    query: str,
+    preferred_types: list[str] | None = None,
+    intent: str | None = None,
+    top_k: int = 5,
+    disposition_k: int = 3,
+) -> dict:
     """
     检索入口。
 
     原则：永远不做硬过滤。只做后处理 boost。
 
     参数:
-        query:           用户查询
-        preferred_types: 用户问题暗示的类型（用于 boost，不是过滤）
-        top_k:           返回 fact 数量
-        disposition_k:    返回 disposition 数量（默认 3）
+        query:            用户查询
+        preferred_types:  用户问题暗示的类型（用于 boost，不是过滤）
+        intent:           意图分类结果（13种之一，或 None）
+                          intent 为 "other" 时询问用户，不继续
+                          intent 为 None 时不做 intent 过滤
+        top_k:            返回 fact 数量
+        disposition_k:     返回 disposition 数量（默认 3）
 
     返回:
         {
             "facts":        [...],   # L1 检索结果（已 boost + 截断）
             "scenes":       [...],   # 关联的 L2 scenes
-            "dispositions": [...],   # 条件-预测行为模式（新增）
+            "dispositions": [...],   # 条件-预测行为模式
             "query":        query,
+            "intent":      intent,  # 本次使用的意图（None 表示未分类）
         }
     """
     # Step 1: 纯语义搜索 top_k=20
     query_emb = get_embedding(query)
-    l1_results = vector_search_l1(query_emb, top_k=20)
 
-    # Step 1b: 并行搜索 dispositions（condition 语义匹配）
-    dispositions = vector_search_dispositions(query_emb, top_k=disposition_k)
+    # Step 1b: 并行搜索 dispositions（intent 过滤）
+    dispositions = vector_search_dispositions(
+        query_emb,
+        top_k=disposition_k,
+        intent=intent if intent and intent != "other" else None,
+    )
+
+    l1_results = vector_search_l1(query_emb, top_k=20)
 
     # Step 2: 关联到 L2 scenes（用 scene_embedding 相似度）
     l2_scenes = _associate_scenes(l1_results)
@@ -127,6 +164,7 @@ def retrieve(query: str, preferred_types: list[str] | None = None,
         "scenes":       l2_scenes,
         "dispositions": dispositions,
         "query":        query,
+        "intent":       intent,
     }
 
 
