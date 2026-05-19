@@ -64,9 +64,25 @@ In HermemMemoryProvider, `sync_turn()` detects corrections via three-tier detect
 
 Run `python phase3/v4_2_migrate.py` to expand the disposition dataset from new sessions.
 
-### V4.3 — Error-Activated Retrieval (planned)
+### V4.3 — Error-Activated Retrieval (planned — V4.2 缺口承接)
 
-Instead of similarity-based retrieval, activate memories where similar predictions have historically failed.
+V4.2 的 dispositions 已支持存储和检索，但误差驱动的学习闭环尚未完成。V4.3 承接以下 backlog：
+
+**Step 5 联动实现：**
+- `async_annotation.py` worker 在生成 `prediction_errors` 后，调用 `update_dispositions_from_errors()` 按 error_type 匹配 disposition 并递增 `error_count`
+- 建立 error_type → condition_text 的映射规则（如 `design_decision_error` → condition 含"设计/方案"）
+
+**检索加权：**
+- 修改 `retrieve()` 排序逻辑：`score = cosine_similarity * (1 + error_rate)`
+- 高误差率的 disposition 在相似条件下排名更高
+
+**error_history 字段：**
+- 表结构增加 `error_history` JSON 字段，记录每次误差的 session_id、timestamp、actual_outcome
+
+**Live 验证：**
+- 修复 gateway batching 问题，确保 correction 消息独立触发 `sync_turn()`
+
+Run `python phase3/v4_2_migrate.py` to expand the disposition dataset from new sessions.
 
 ## Requirements
 
