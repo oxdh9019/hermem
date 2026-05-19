@@ -10,7 +10,8 @@ Hermes lightweight memory enhancement system — L0–L3 hierarchical memory wit
 | **V4** | **Predictive Memory** | Phase 4 — memory as generative model, not stored text |
 | **V4.1** | **Error Annotation** | Predict what should happen; tag prediction errors when they don't |
 
-> **V4.1 (Error Annotation) is active.** Run `python phase3/impl/verify_annotation.py` to check signal quality after a few days of data accumulation.
+> **V4.3 (Error-Activated Retrieval, beta) is active.** Tag: `v4.3.0-beta`
+> Run `python phase3/impl/verify_annotation.py` to check signal quality after a few days of data accumulation.
 
 ## What Hermem Actually Does
 
@@ -26,7 +27,7 @@ L2: Scene clusters (topic groups with occurrence counts)
 L3: Staging → user_profile.md confirmation
 ```
 
-Current data: **914 L1 facts, 16 L1 dispositions, 50 L2 scenes** (as of 2026-05-19).
+Current data: **~1145 L1 chunks, 22 L1 dispositions (6 model_error + 16 user_behavior), ~30 L2 scenes** (as of 2026-05-20).
 
 ## Phase 4 — Predictive Memory (V4)
 
@@ -64,29 +65,31 @@ In HermemMemoryProvider, `sync_turn()` detects corrections via three-tier detect
 
 Run `python phase3/v4_2_migrate.py` to expand the disposition dataset from new sessions.
 
-### V4.3 — Error-Activated Retrieval (planned — V4.2 缺口承接)
+### V4.3 — Error-Activated Retrieval (beta — `v4.3.0-beta`)
 
-V4.2 的 dispositions 已支持存储和检索，但误差驱动的学习闭环尚未完成。V4.3 承接以下 backlog：
+V4.3 在 V4.2 的基础上完成了误差驱动的学习闭环。
 
-**Step 5 联动实现：**
-- `async_annotation.py` worker 在生成 `prediction_errors` 后，调用 `update_dispositions_from_errors()` 按 error_type 匹配 disposition 并递增 `error_count`
-- 建立 error_type → condition_text 的映射规则（如 `design_decision_error` → condition 含"设计/方案"）
+**已完成：**
 
-**检索加权：**
-- 修改 `retrieve()` 排序逻辑：`score = cosine_similarity * (1 + error_rate)`
-- 高误差率的 disposition 在相似条件下排名更高
+- **B1** — `update_dispositions_from_errors()` 按 error_type 匹配 disposition 并递增 error_count
+- **B4** — 同步 annotation 路径（`sync_turn()` → `annotate_l0_after_l1_v2()` → `update_dispositions_from_errors()`，同一轮内立即生效）
+- **B5** — scope 过滤：disposition 表加 `scope` 列（`model_error` vs `user_behavior`），检索时隔离
+- **B6** — Disposition 衰减机制：时间半衰期（7天）× 频次衰减，高频 disposition 权重更高
+- **B8** — 三维权召回 ranking：`score = sim × f_time × min(error_count, 5)`
+- **B9** — few-shot 示例：8个示例覆盖全 5 种 error_type + 反例 + 边界 case
 
-**error_history 字段：**
-- 表结构增加 `error_history` JSON 字段，记录每次误差的 session_id、timestamp、actual_outcome
+**待完成（pending success_count 积累）：**
 
-**Live 验证：**
-- 修复 gateway batching 问题，确保 correction 消息独立触发 `sync_turn()`
+- **B3** — 动态 threshold：需要 success_count > 0 才能建立 error_count/success_count 分布
+- **B7** — 多 error_type 权重：依赖 B3 动态 threshold 输出
 
-Run `python phase3/v4_2_migrate.py` to expand the disposition dataset from new sessions.
+**待完成（P2 阶段）：**
+
+- **B10** — 跨 session 误差模式
+- **B11** — token 成本监控
 
 ## Requirements
 
-- Python 3.10+
 - Ollama (`localhost:11434`) — bge-m3 for embeddings, qwen2.5:3b for extraction
 - SQLite 3 (built into Python stdlib)
 
@@ -149,7 +152,7 @@ hermem/
 | Phase 3 `plugins/memory/hermem/` | ✅ Implemented — HermemMemoryProvider with Hermem Phase 2 backend, registered in Hermes config as `memory.provider: hermem` |
 | V4.1 Error Annotation | ✅ Implemented — async queue + V3 prompt, awaiting data accumulation |
 | V4.2 Conditioned Dispositions | ✅ Implemented — l1_dispositions table, extract_dispositions(), vector_search_dispositions(), three-tier correction detection in HermemMemoryProvider |
-| V4.3 Error-Activated Retrieval | ⚠️ Partial — dispositions stored and retrieved, but annotation→disposition error_count闭环未完成 |
+| V4.3 Error-Activated Retrieval | ✅ Beta (`v4.3.0-beta`) — B1/B4/B5/B6/B8/B9 complete, B3/B7 pending success_count |
 | Unit tests | ❌ None — smoke-test only |
 | CI/CD | ❌ None |
 | Community stars | 0 — personal project, no external users |
