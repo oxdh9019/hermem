@@ -26,7 +26,7 @@ L2: Scene clusters (topic groups with occurrence counts)
 L3: Staging → user_profile.md confirmation
 ```
 
-Current data: **316 L1 facts, 41 L2 scenes, 0 L3** (as of 2026-05-16).
+Current data: **914 L1 facts, 16 L1 dispositions, 50 L2 scenes** (as of 2026-05-19).
 
 ## Phase 4 — Predictive Memory (V4)
 
@@ -49,9 +49,20 @@ After each session, annotate L0 with prediction errors the assistant made:
 Annotation runs **asynchronously** (background queue, does not block session processing).
 Run `python phase3/impl/verify_annotation.py` to audit signal quality.
 
-### V4.2 — Conditioned Dispositions (planned)
+### V4.2 — Conditioned Dispositions (active)
 
-Replace propositional L1 facts with: `(condition, prediction, confidence, error_history)`.
+Replace propositional L1 facts with `(condition, prediction, confidence, error_history)`. After V4.1 annotates a session with prediction errors, V4.2 stores the corrected behavior pattern as a conditioned disposition:
+
+- `condition_text`: when does this pattern activate?
+- `prediction_text`: what does the user expect?
+- `condition_embedding`: semantic index for retrieval
+- `confidence`: initial confidence from extraction evidence
+
+Dispositions are extracted by `extract_dispositions()` from session summaries (LLM, confidence ≥ 0.6 required). Retrieved in parallel with L1 facts via `vector_search_dispositions()` — ranked by cosine similarity against the current query's condition embedding.
+
+In HermemMemoryProvider, `sync_turn()` detects corrections via three-tier detection (strong keyword / medium cosine / weak negation heuristic) and activates matching dispositions for the next turn. Active dispositions decay after 2 turns of no correction signal.
+
+Run `python phase3/v4_2_migrate.py` to expand the disposition dataset from new sessions.
 
 ### V4.3 — Error-Activated Retrieval (planned)
 
@@ -119,9 +130,10 @@ hermem/
 |-------|--------|
 | Phase 1/2 skill layer | ✅ `skills/hermem/` (session-summary, memory-warmup, memory-tools) — real, loaded in Hermes |
 | Phase 1/2 plugin layer (`plugins/memory/hermem/`) | ❌ Empty — `memory.provider: hermem` in config points to non-existent plugin |
-| Phase 3 `plugins/memory/hermem/` | ❌ Same — plugin not registered; Hermem works via skill + cron, not as a memory provider |
+| Phase 3 `plugins/memory/hermem/` | ✅ Implemented — HermemMemoryProvider with Hermem Phase 2 backend, registered in Hermes config as `memory.provider: hermem` |
 | V4.1 Error Annotation | ✅ Implemented — async queue + V3 prompt, awaiting data accumulation |
-| V4.2 / V4.3 | ❌ Design only, not implemented |
+| V4.2 Conditioned Dispositions | ✅ Implemented — l1_dispositions table, extract_dispositions(), vector_search_dispositions(), three-tier correction detection in HermemMemoryProvider |
+| V4.3 Error-Activated Retrieval | ⚠️ Partial — dispositions stored and retrieved, but annotation→disposition error_count闭环未完成 |
 | Unit tests | ❌ None — smoke-test only |
 | CI/CD | ❌ None |
 | Community stars | 0 — personal project, no external users |
