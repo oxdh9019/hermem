@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Hermem Phase 3 - V4.3 B1: Disposition 联动更新器
+Hermem Phase 3 - V4.3 B1: Disposition 联动更新器（三层 cascade 匹配）
 
 功能：
   在 annotation 命中 prediction_errors 后，更新对应 l1_dispositions 的
   error_count / last_error_at / success_count。
 
 匹配策略（优先级递减）：
-  1. source_session_id 直接关联
-  2. prediction_text 的 Jaccard 相似度匹配（阈值 0.5）
+  Layer 1: error_type 精确匹配
+  Layer 2: 关键词交集匹配（≥2 个关键词命中）
+  Layer 3: condition_embedding 余弦相似度兜底（阈值 0.45）
 
 使用方式：
   from .disposition_updater import update_dispositions_from_errors
@@ -18,19 +19,68 @@ Hermem Phase 3 - V4.3 B1: Disposition 联动更新器
   async_annotation.py 的 _worker() 中，annotate_l0_after_l1_v2() 返回后调用。
 """
 
+import re
 import sqlite3
-import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .config import DB_PATH
-from .utils import db_query_dict
 
 
 # ── 阈值常量 ────────────────────────────────────────────────────
-JACCARD_THRESHOLD = 0.50   # 低于此值不匹配
-MIN_PREDICTION_LEN = 5     # 预测文本太短不做 Jaccard 匹配
+EMBEDDING_THRESHOLD = 0.40   # Layer 3 fallback 阈值（0.40 以下相似度与随机无异）
+KEYWORD_MIN_OVERLAP = 2      # Layer 2 至少命中 2 个关键词
+
+
+# ── 工具函数 ────────────────────────────────────────────────────
+
+def extract_keywords(text: str) -> set[str]:
+    """
+    从文本中提取关键词（中文按字符/bigram，英文按分词）。
+    去除常见停用词，返回小写集合。
+    """
+    if not text:
+        return set()
+
+    stopwords = {
+        '的', '了', '是', '在', '我', '你', '他', '她', '它', '我们', '你们', '他们',
+        '这', '那', '有', '说', '也', '不', '就', '都', '啊', '呢', '吧', '吗', '哦',
+        '和', '与', '或', '但', '而', '着', '过', '被', '把', '给', '让', '向', '从',
+        'the', 'a', 'an', 'and', 'or', 'but', 'to', 'for', 'of', 'with', 'by', 'from',
+        'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
+        'i', 'you', 'he', 'she', 'it', 'we', 'they', 'what', 'which', 'that', 'this',
+    }
+
+    # 中文 bigram + unigram
+    chinese_chars = re.findall(r'[\u4e00-\u9fff]+', text)
+    chinese_words = set()
+    for chunk in chinese_chars:
+        for i in range(len(chunk)):
+            if len(chunk[i]) > 0:
+                chinese_words.add(chunk[i].lower())
+        for i in range(len(chunk) - 1):
+            chinese_words.add(chunk[i:i+2].lower())
+
+    # 英文分词
+    english_words = set(w.lower() for w in re.findall(r'[a-zA-Z]+', text))
+
+    all_words = chinese_words | english_words
+    return {w for w in all_words if w not in stopwords and len(w) > 1}
+
+
+def _update_error_count(db_path: Path, disp_id: str, now_iso: str) -> None:
+    """更新单条 disposition 的 error_count，返回是否实际更新（error_count>0 时才写）"""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE l1_dispositions "
+        "SET error_count = error_count + 1, "
+        "    last_error_at = ? "
+        "WHERE id = ?",
+        (now_iso, disp_id)
+    )
+    conn.commit()
+    conn.close()
 
 
 # ── 核心函数 ────────────────────────────────────────────────────
@@ -41,6 +91,13 @@ def update_dispositions_from_errors(
 ) -> int:
     """
     根据 L0 error_annotation 更新 l1_dispositions 的 error_count / last_error_at。
+
+    三层 cascade 匹配（优先级递减）：
+      Layer 1: error_type 精确匹配（需 disposition.error_type 非空）
+      Layer 2: 关键词交集匹配（提取 annotation 的 model_prediction 关键词，
+               与 disposition.keywords 或 condition_text/prediction_text 匹配，
+               至少 2 个交集）
+      Layer 3: condition_embedding 余弦相似度兜底（阈值 0.45）
 
     Args:
         session_id:  当前会话 ID
@@ -55,67 +112,124 @@ def update_dispositions_from_errors(
         return 0
 
     db_path = Path(DB_PATH).expanduser()
+
+    # 加载所有 active dispositions（仅 scope='model_error'）
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    dispositions = conn.execute(
+        "SELECT id, condition_text, prediction_text, condition_embedding, "
+        "       error_type, keywords "
+        "FROM l1_dispositions "
+        "WHERE is_active = 1 AND scope = 'model_error'"
+    ).fetchall()
+    conn.close()
 
-    # ── 策略 1: source_session_id 直接关联 ────────────────────
-    cursor.execute(
-        "SELECT id, prediction_text FROM l1_dispositions "
-        "WHERE source_session_id = ? AND is_active = 1",
-        (session_id,)
-    )
-    direct_dispositions = cursor.fetchall()
+    if not dispositions:
+        return 0
 
-    # ── 策略 2: 加载所有 active dispositions（用于 Jaccard 匹配）──
-    # 仅在策略1无结果时做全局匹配，避免跨 session 错误扩散
-    global_dispositions = []
-    if not direct_dispositions:
-        all_rows = db_query_dict(
-            "SELECT id, prediction_text FROM l1_dispositions "
-            "WHERE is_active = 1"
-        )
-        global_dispositions = all_rows
+    # 预加载 condition_embedding 为 numpy 数组
+    from .utils import deserialize_vec, cosine_sim, get_embedding
+    try:
+        import numpy as _np
+    except ImportError:
+        return 0
+
+    disp_vecs = {}
+    for d in dispositions:
+        emb_bytes = d["condition_embedding"]
+        if emb_bytes:
+            try:
+                disp_vecs[d["id"]] = _np.array(
+                    deserialize_vec(emb_bytes), dtype=_np.float64
+                )
+            except Exception:
+                disp_vecs[d["id"]] = None
+        else:
+            disp_vecs[d["id"]] = None
 
     now_iso = datetime.now().isoformat()
     updated_count = 0
 
     for error in prediction_errors:
-        model_prediction = error.get("model_prediction", "")
-        if not model_prediction or len(model_prediction) < MIN_PREDICTION_LEN:
+        error_type = error.get("error_type", "") or ""
+        model_pred = error.get("model_prediction", "") or ""
+        context = error.get("context", "") or ""
+
+        if not model_pred.strip():
             continue
 
+        # ── Layer 1: error_type 精确匹配 ──
         matched_id = None
+        match_reason = ""
 
-        # 1. 优先直接关联
-        for disp in direct_dispositions:
-            pred_text = disp["prediction_text"] or ""
-            if _jaccard_sim(model_prediction, pred_text) >= JACCARD_THRESHOLD:
-                matched_id = disp["id"]
-                break
-
-        # 2. 无直接关联 → 全局 Jaccard 匹配（保守）
-        if matched_id is None and not direct_dispositions:
-            for disp in global_dispositions:
-                pred_text = disp["prediction_text"] or ""
-                if _jaccard_sim(model_prediction, pred_text) >= JACCARD_THRESHOLD:
-                    matched_id = disp["id"]
+        if error_type:
+            for d in dispositions:
+                if d["error_type"] and d["error_type"] == error_type:
+                    matched_id = d["id"]
+                    match_reason = f"error_type={error_type}"
+                    _update_error_count(db_path, matched_id, now_iso)
+                    updated_count += 1
+                    print(f"  [L1 match] {match_reason}  disp={matched_id[:40]}  pred={model_pred[:40]}")
                     break
 
+        # ── Layer 2: 关键词交集匹配 ──
         if matched_id is None:
-            continue
+            error_kw = extract_keywords(model_pred)
+            if context:
+                error_kw |= extract_keywords(context)
 
-        cursor.execute(
-            "UPDATE l1_dispositions "
-            "SET error_count = error_count + 1, "
-            "    last_error_at = ? "
-            "WHERE id = ?",
-            (now_iso, matched_id)
-        )
-        updated_count += 1
+            if error_kw:
+                best_kw_match = None
+                best_overlap = 0
 
-    conn.commit()
-    conn.close()
+                for d in dispositions:
+                    # 优先用 disposition.keywords，其次 condition_text + prediction_text
+                    disp_keywords_raw = d["keywords"] or ""
+                    if disp_keywords_raw:
+                        disp_kw = set(k.strip().lower() for k in disp_keywords_raw.split(',') if k.strip())
+                    else:
+                        disp_kw = extract_keywords((d["condition_text"] or "") + " " + (d["prediction_text"] or ""))
+
+                    overlap = len(error_kw & disp_kw)
+                    if overlap >= KEYWORD_MIN_OVERLAP and overlap > best_overlap:
+                        best_overlap = overlap
+                        best_kw_match = d["id"]
+
+                if best_kw_match:
+                    matched_id = best_kw_match
+                    match_reason = f"keywords_overlap={best_overlap}"
+                    _update_error_count(db_path, matched_id, now_iso)
+                    updated_count += 1
+                    print(f"  [L2 match] {match_reason}  disp={matched_id[:40]}  pred={model_pred[:40]}")
+
+        # ── Layer 3: embedding 语义相似度 fallback ──
+        if matched_id is None:
+            try:
+                query_emb = get_embedding(model_pred)
+                query_vec = _np.array(query_emb, dtype=_np.float64)
+            except Exception:
+                query_vec = None
+
+            if query_vec is not None:
+                best_sim = -1.0
+                best_emb_id = None
+
+                for d in dispositions:
+                    d_vec = disp_vecs.get(d["id"])
+                    if d_vec is None:
+                        continue
+                    sim = float(cosine_sim(query_vec, d_vec))
+                    if sim > best_sim:
+                        best_sim = sim
+                        best_emb_id = d["id"]
+
+                if best_emb_id is not None and best_sim > EMBEDDING_THRESHOLD:
+                    matched_id = best_emb_id
+                    match_reason = f"embedding_sim={best_sim:.3f}"
+                    _update_error_count(db_path, matched_id, now_iso)
+                    updated_count += 1
+                    print(f"  [L3 match] {match_reason}  disp={matched_id[:40]}  pred={model_pred[:40]}")
+
     return updated_count
 
 
@@ -136,7 +250,7 @@ def increment_success_count(session_id: str) -> int:
         "UPDATE l1_dispositions "
         "SET success_count = success_count + 1 "
         "WHERE source_session_id = ? AND is_active = 1",
-        (now_iso, session_id)
+        (session_id,)
     )
     updated = cursor.rowcount
     conn.commit()

@@ -60,8 +60,7 @@ def _worker():
                 with open(l0_path) as f:
                     data = json.load(f)
                 if "error_annotation" in data:
-                    _annotation_queue.task_done()
-                    continue
+                    continue   # 幂等跳过，finally 会调用 task_done()
 
             annotation = _annotate(
                 session_id=session_id,
