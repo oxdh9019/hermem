@@ -5,6 +5,7 @@ Step 3b: vector_search_l1() — 纯语义，无类型过滤
 Step 3c: retrieve() — 后处理 boost（替代硬过滤）
 """
 import json as json_lib
+from datetime import datetime
 from .config import DB_PATH
 from .utils import (
     get_embedding, cosine_sim,
@@ -71,6 +72,7 @@ def vector_search_dispositions(
         DISPOSITION_MIN_COUNT,
         DISPOSITION_MAX_FACTOR,
         DISPOSITION_BASE_WEIGHT,
+        DISPOSITION_MAX_ERROR_COUNT,
     )
 
     conn = sqlite3.connect(DB_PATH)
@@ -117,7 +119,31 @@ def vector_search_dispositions(
                 base_weight=DISPOSITION_BASE_WEIGHT,
             )
 
-        activation_score = sim * disp_weight
+        # ── B8: activation_score = sim × f_time × min(error_count, cap) ──
+        # 与 B6 的 f_freq 解耦：B8 让 error_count 直接参与排序，
+        # cap 防止单个 disposition 垄断（如 error_count=100 的 disposition）
+        error_count = row["error_count"] or 0
+        capped_error = min(error_count, DISPOSITION_MAX_ERROR_COUNT)
+        # f_time 仍然决定时间衰减
+        if row["last_error_at"]:
+            try:
+                last_dt = datetime.fromisoformat(row["last_error_at"].replace("Z", "+00:00"))
+            except ValueError:
+                f_time_ranking = 1.0
+            else:
+                now = datetime.now(last_dt.tzinfo) if last_dt.tzinfo else datetime.now()
+                delta_days = (now - last_dt).total_seconds() / 86400.0
+                f_time_ranking = 0.5 ** (delta_days / DISPOSITION_HALF_LIFE_DAYS)
+        else:
+            f_time_ranking = 1.0
+
+        # error_count=0 → 0.5（抑制），error_count=1 → 1.0，2+ → 线性增长 capped
+        if capped_error == 0:
+            error_factor = 0.5
+        else:
+            error_factor = capped_error
+
+        activation_score = sim * f_time_ranking * error_factor
 
         results.append({
             "id":             row["id"],
@@ -127,10 +153,11 @@ def vector_search_dispositions(
             "source_agent":   row["source_agent"],
             "intent":         row["intent"] if "intent" in row.keys() else None,
             "scope":          row["scope"] if "scope" in row.keys() else None,
-            "error_count":   row["error_count"] or 0,
+            "error_count":    error_count,
             "weight":         disp_weight,
             "_sim":           sim,
-            "_weight":        disp_weight,
+            "_f_time":        f_time_ranking,
+            "_error_factor":  error_factor,
             "_activation":    activation_score,
         })
 

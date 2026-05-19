@@ -28,6 +28,8 @@ DISPOSITION_HALF_LIFE_DAYS = 7    # 半衰期 7 天
 DISPOSITION_MIN_COUNT       = 2   # 至少 2 次错误才增强
 DISPOSITION_MAX_FACTOR      = 2.0  # 最高增强到 2 倍
 DISPOSITION_BASE_WEIGHT     = 1.0 # 中性起点
+# B8: ranking cap — error_count 超过此值时封顶，不再线性增长
+DISPOSITION_MAX_ERROR_COUNT = 5   # error_count 超过 5 则封顶（防止单个 disposition 垄断）
 
 # ── L3 Staging 阈值 ─────────────────────────────────────────
 STAGING_CONFIRM_THRESHOLD = 5   # 满 5 条推一次确认
