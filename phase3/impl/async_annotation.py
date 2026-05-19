@@ -45,17 +45,21 @@ def _worker():
         except queue.Empty:
             continue
 
-        session_id, session_summary, l1_facts = item
+        # 兼容两种格式：2-tuple（轻量级）或 3-tuple（标准）
+        if len(item) == 2:
+            session_id, session_summary = item
+            l1_facts = []
+        else:
+            session_id, session_summary, l1_facts = item
 
         try:
-            # 幂等检查放在 dequeue 后、调用前（避免竞态窗口）
-            from .config import L0_DIR
-            l0_path = Path(L0_DIR) / f"{session_id}.json"
+            # 幂等检查：优先查 L0 文件，再查 lightweight cache
+            from .config import L0_DIR as _L0_DIR
+            l0_path = Path(_L0_DIR) / f"{session_id}.json"
             if l0_path.exists():
                 with open(l0_path) as f:
                     data = json.load(f)
                 if "error_annotation" in data:
-                    # 已标注，无需再处理
                     _annotation_queue.task_done()
                     continue
 
@@ -67,6 +71,18 @@ def _worker():
             )
             if annotation is None:
                 print(f"[AsyncAnnotation] 生成失败（见上方日志）: {session_id}")
+            elif annotation.get("prediction_errors"):
+                # V4.3 B1: 联动更新 disposition error_count
+                from .disposition_updater import update_dispositions_from_errors
+                updated = update_dispositions_from_errors(session_id, annotation)
+                if updated > 0:
+                    print(f"[AsyncAnnotation] B1 更新了 {updated} 条 disposition error_count")
+            else:
+                # V4.3 B1: 无 prediction_errors → 累加 success_count
+                from .disposition_updater import increment_success_count
+                incremented = increment_success_count(session_id)
+                if incremented > 0:
+                    print(f"[AsyncAnnotation] B1 累加 {incremented} 条 disposition success_count")
         except Exception as e:
             print(f"[AsyncAnnotation] 异常: {session_id} - {e}")
         finally:
@@ -93,29 +109,34 @@ def stop_worker(wait: bool = True):
     print("[AsyncAnnotation] 后台工作线程已停止")
 
 
+def enqueue_annotation_lightweight(
+    session_id: str,
+    session_summary: str,
+) -> int:
+    """
+    轻量级入队接口（用于 Hermes Agent 实时流程）。
+    仅需 session_id + 对话摘要文本，不依赖 L0 文件。
+    queue item 为 2-tuple: (session_id, session_summary)
+    """
+    if not session_id or not session_summary:
+        return _annotation_queue.qsize()
+    _annotation_queue.put((session_id, session_summary))
+    return _annotation_queue.qsize()
+
+
+# ── 兼容旧接口（3-tuple: session_id, session_summary, l1_facts）─────────
+
 def enqueue_annotation(
     session_id: str,
     session_summary: str,
     l1_facts: list[dict],
 ) -> int:
     """
-    将 annotation 任务放入异步队列。
-
-    参数：
-        session_id:      会话 ID
-        session_summary: 对话摘要
-        l1_facts:        已提取的 L1 facts 列表
-
-    返回：
-        队列中的任务数量（便于观察积压情况）
-
-    注意：
-        - 调用后立即返回，不等待完成
-        - 不对 session_id 和 session_summary 做空检查（由调用方保证）
+    标准入队接口（用于 process_session 批量流程）。
+    queue item 为 3-tuple: (session_id, session_summary, l1_facts)
     """
     if not session_id:
         return _annotation_queue.qsize()
-
     _annotation_queue.put((session_id, session_summary, l1_facts))
     return _annotation_queue.qsize()
 
