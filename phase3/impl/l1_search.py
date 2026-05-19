@@ -46,7 +46,42 @@ def vector_search_l1(query_emb, top_k: int = 20) -> list[dict]:
     return results[:top_k]
 
 
-def retrieve(query: str, preferred_types: list[str] | None = None, top_k: int = 5) -> dict:
+def vector_search_dispositions(query_emb, top_k: int = 5) -> list[dict]:
+    """
+    语义搜索 l1_dispositions 表的 condition_text。
+    与 vector_search_l1 并行工作，但针对行为模式检索。
+    """
+    import sqlite3
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id, condition_text, prediction_text, confidence, source_agent, condition_embedding "
+        "FROM l1_dispositions WHERE is_active = 1"
+    ).fetchall()
+    conn.close()
+
+    results = []
+    for row in rows:
+        emb_bytes = row["condition_embedding"]
+        if not emb_bytes:
+            continue
+        emb = deserialize_vec(emb_bytes)
+        sim = cosine_sim(query_emb, emb)
+        results.append({
+            "id":           row["id"],
+            "condition":    row["condition_text"],
+            "prediction":   row["prediction_text"],
+            "confidence":   row["confidence"],
+            "source_agent": row["source_agent"],
+            "_sim":         sim,
+        })
+
+    results.sort(key=lambda x: x["_sim"], reverse=True)
+    return results[:top_k]
+
+
+def retrieve(query: str, preferred_types: list[str] | None = None,
+             top_k: int = 5, disposition_k: int = 3) -> dict:
     """
     检索入口。
 
@@ -56,17 +91,22 @@ def retrieve(query: str, preferred_types: list[str] | None = None, top_k: int = 
         query:           用户查询
         preferred_types: 用户问题暗示的类型（用于 boost，不是过滤）
         top_k:           返回 fact 数量
+        disposition_k:    返回 disposition 数量（默认 3）
 
     返回:
         {
-            "facts":  [...],   # L1 检索结果（已 boost + 截断）
-            "scenes": [...],  # 关联的 L2 scenes
-            "query":  query,
+            "facts":        [...],   # L1 检索结果（已 boost + 截断）
+            "scenes":       [...],   # 关联的 L2 scenes
+            "dispositions": [...],   # 条件-预测行为模式（新增）
+            "query":        query,
         }
     """
     # Step 1: 纯语义搜索 top_k=20
     query_emb = get_embedding(query)
     l1_results = vector_search_l1(query_emb, top_k=20)
+
+    # Step 1b: 并行搜索 dispositions（condition 语义匹配）
+    dispositions = vector_search_dispositions(query_emb, top_k=disposition_k)
 
     # Step 2: 关联到 L2 scenes（用 scene_embedding 相似度）
     l2_scenes = _associate_scenes(l1_results)
@@ -83,9 +123,10 @@ def retrieve(query: str, preferred_types: list[str] | None = None, top_k: int = 
         l1_results = l1_results[:top_k]
 
     return {
-        "facts":  l1_results,
-        "scenes": l2_scenes,
-        "query":  query,
+        "facts":        l1_results,
+        "scenes":       l2_scenes,
+        "dispositions": dispositions,
+        "query":        query,
     }
 
 

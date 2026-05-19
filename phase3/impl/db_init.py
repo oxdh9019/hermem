@@ -63,10 +63,53 @@ CREATE TABLE IF NOT EXISTS l3_staging (
 conn.commit()
 conn.close()
 
+# ── V4.2: Conditioned Dispositions ──────────────────────────
+_conn = sqlite3.connect(DB)
+_conn.execute("""
+    CREATE TABLE IF NOT EXISTS l1_dispositions (
+        id                   TEXT PRIMARY KEY,
+        l0_ref               TEXT,
+        condition_text       TEXT NOT NULL,
+        prediction_text      TEXT NOT NULL,
+        condition_embedding  BLOB,
+        prediction_embedding  BLOB,
+        confidence           REAL DEFAULT 1.0,
+        error_count          INTEGER DEFAULT 0,
+        success_count        INTEGER DEFAULT 0,
+        last_error_at        TEXT,
+        created_at           TEXT NOT NULL,
+        last_used_at         TEXT,
+        usage_count          INTEGER DEFAULT 0,
+        is_active            INTEGER DEFAULT 1
+    )
+""")
+_conn.execute("""
+    CREATE TABLE IF NOT EXISTS disposition_scene_link (
+        disposition_id TEXT,
+        scene_id       TEXT,
+        relevance      REAL DEFAULT 1.0,
+        PRIMARY KEY (disposition_id, scene_id)
+    )
+""")
+_conn.execute("""
+    CREATE VIEW IF NOT EXISTS dispositions_with_rate AS
+    SELECT *,
+        CASE WHEN (error_count + success_count) > 0
+             THEN 1.0 * error_count / (error_count + success_count)
+             ELSE 0 END AS error_rate
+    FROM l1_dispositions
+""")
+_conn.execute("CREATE INDEX IF NOT EXISTS idx_disp_l0 ON l1_dispositions(l0_ref)")
+_conn.execute("CREATE INDEX IF NOT EXISTS idx_disp_active ON l1_dispositions(is_active)")
+_conn.commit()
+_conn.close()
+
 # Verify
 conn2 = sqlite3.connect(DB)
 tables = [r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+views  = [r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='view'").fetchall()]
 conn2.close()
 
 print(f"✓ l0_l3.db initialized at {DB}")
 print(f"  Tables: {', '.join(tables)}")
+print(f"  Views:  {', '.join(views)}")

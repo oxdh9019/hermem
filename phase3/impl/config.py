@@ -137,3 +137,41 @@ L1_EXTRACT_PROMPT = """你是一个记忆分析器。从以下会话摘要中提
   {{"types": ["bug-fix", "unresolved"], "content": "Oliver 尝试了 SQLite 的 unicode61、trigram、porter 等分词器，全部失败，中文搜索无法正常工作", "tags": ["sqlite", "chinese-search", "分词"], "value": "high"}},
   {{"types": ["decision", "method"], "content": "Oliver 决定使用 Python 2-gram 滑动窗口提取关键词来绕过 SQLite 的分词限制", "tags": ["sqlite", "chinese-search", "python"], "value": "high"}}
 ]}}"""
+
+
+# ── V4.2: Conditioned Dispositions ─────────────────────────
+DISPOSITION_EXTRACT_PROMPT = """你是一个记忆倾向分析器。基于以下对话摘要，识别用户（Oliver）行为的条件-预测对。
+
+对话摘要：
+%s
+
+已有原子事实：
+%s
+
+任务：从对话中提取所有有明确证据的条件-预测对。
+
+格式（严格JSON数组，不要markdown包裹）：
+[["condition", "...", "prediction", "...", "confidence", 0.x], ...]
+
+示例1（有行为倾向时）：
+输入摘要：Oliver说"我讨厌你每次都先说好话再提意见，直接说就行了"。助手理解了他的偏好。
+输出：
+[["condition", "当 Oliver 收到先夸后批的反馈时", "prediction", "他会感到不耐烦，希望助手直接提出批评", "confidence", 0.95]]
+
+示例2（有多次行为证据时）：
+输入摘要：Oliver多次说"不同意spawn subagent"，坚持直接联系writer agent。他要求所有操作必须按"创作流程手册"执行，不允许spawn新的子代理。
+输出：
+[["condition", "当需要联系子代理时", "prediction", "Oliver 禁止 spawn subagent，要求直接联系现有 agent", "confidence", 0.9], ["condition", "当有新章节启动时", "prediction", "Oliver 要求严格按照'创作流程手册'执行，不接受偏离", "confidence", 0.85]]
+
+示例3（无行为倾向时）：
+输入摘要：助手帮助Oliver修复了一个bug，清理了test_l0_l3.db测试库文件。
+输出：
+[]
+
+规则：
+- condition 以 "当 Oliver ..." 或 "当用户 ..." 开头（中文）
+- prediction 用中文描述 Oliver 的预期行为或偏好
+- 只输出有明确对话证据的倾向，不要过度泛化
+- confidence 基于证据强度：直接引用 Oliver 原话=0.9-1.0，有明确暗示=0.7-0.85，模糊推断=0.5-0.65
+- confidence < 0.6 的不要输出
+- 如果没有明确的条件-预测对，输出空数组 []"""

@@ -53,6 +53,77 @@ def extract_l1_facts(session_summary: str) -> list[dict]:
     return valid
 
 
+def extract_dispositions(session_summary: str, l1_facts: list[dict] | None = None) -> list[dict]:
+    """
+    从会话摘要中提取条件-预测对（dispositions）。
+    可选传入已有 L1 facts 作为上下文辅助。
+    """
+    from .utils import llm_generate, json_loads
+
+    facts_text = ""
+    if l1_facts:
+        facts_text = "\n".join(
+            f"- [{f.get('types', ['?'])[0]}] {f.get('content', '')[:80]}"
+            for f in l1_facts[:10]
+        )
+
+    from .config import DISPOSITION_EXTRACT_PROMPT
+    prompt = DISPOSITION_EXTRACT_PROMPT % (
+        session_summary,
+        facts_text or "（无）",
+    )
+
+    content = llm_generate(prompt, temperature=1.0, max_tokens=1024)
+    text = content.strip()
+    if text.startswith("```"):
+        parts = text.split("```", 2)
+        if len(parts) >= 3:
+            text = parts[1]
+            if text.startswith("json"):
+                text = text[4:]
+    text = text.strip().strip("`")
+
+    import re as _re
+    match = _re.search(r'\[[\s\S]*\]', text)
+    if match:
+        data = json_loads(match.group())
+    else:
+        data = json_loads(text)
+
+    # 支持 dict-format 或 list-of-lists-format
+    if isinstance(data, dict):
+        data = data.get("dispositions", [data])
+
+    valid = []
+    for item in data:
+        if isinstance(item, list) and len(item) >= 6:
+            try:
+                d = {
+                    "condition": str(item[1]),
+                    "prediction": str(item[3]),
+                    "confidence": float(item[5]) if item[5] is not None else 0.0
+                }
+            except (IndexError, ValueError, TypeError):
+                continue
+        elif isinstance(item, dict):
+            d = item
+        else:
+            continue
+
+        conf = d.get("confidence", 0)
+        if conf < 0.6:
+            continue
+        cond = str(d.get("condition", "")).strip()
+        pred = str(d.get("prediction", "")).strip()
+        if not cond or not pred:
+            continue
+        # Guard against empty LLM outputs
+        if cond in ("", "null", "None") or pred in ("", "null", "None"):
+            continue
+        valid.append(d)
+    return valid
+
+
 def store_l1_batch(facts: list[dict], l0_ref: str) -> list[str]:
     """
     将 L1 facts 批量写入数据库（同时生成 embedding）。
