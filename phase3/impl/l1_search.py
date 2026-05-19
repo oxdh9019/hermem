@@ -56,7 +56,7 @@ def vector_search_dispositions(query_emb, top_k: int = 5) -> list[dict]:
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT id, condition_text, prediction_text, confidence, source_agent, condition_embedding "
-        "FROM l1_dispositions WHERE is_active = 1"
+        "FROM l1_dispositions WHERE is_active = 1 AND scope = 'model_error'"
     ).fetchall()
     conn.close()
 
