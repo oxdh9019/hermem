@@ -21,11 +21,13 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
+
 # 添加 phase3 到 path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from impl.config import DB_PATH, L0_DIR, OLLAMA_URL, ERROR_ANNOTATION_MODEL
-from impl.utils import llm_generate
+from impl.utils import llm_generate, get_embedding
 
 
 PROMPT_TEMPLATE = """你是一个错误模式分析专家。基于以下对话中的预测误差（error_annotation），
@@ -154,8 +156,8 @@ def main():
                 INSERT INTO l1_dispositions
                     (id, condition_text, prediction_text, error_type, keywords,
                      confidence, source_session_id, source_agent, is_active,
-                     scope, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     scope, created_at, condition_embedding)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 new_id,
                 disp.get("condition_text", ""),
@@ -168,7 +170,17 @@ def main():
                 disp["is_active"],
                 disp.get("scope", "model_error"),
                 now,
+                None,  # condition_embedding filled below
             ))
+            # Generate embedding for condition_text
+            cond_text = disp.get("condition_text", "")
+            if cond_text:
+                emb = get_embedding(cond_text)
+                emb_bytes = np.array(emb, dtype=np.float32).tobytes()
+                cursor.execute(
+                    "UPDATE l1_dispositions SET condition_embedding=? WHERE id=?",
+                    (emb_bytes, new_id)
+                )
             added += 1
             print(f"  → 新增: {disp.get('condition_text', '')[:60]}")
         except Exception as e:
