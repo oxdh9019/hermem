@@ -9,25 +9,33 @@ Hermes lightweight memory enhancement system — L0–L3 hierarchical memory wit
 | V1–V3 | Phase 1–3 | L0→L1→L2→L3 pipeline, semantic search |
 | **V4** | **Predictive Memory** | Phase 4 — memory as generative model, not stored text |
 | **V4.1** | **Error Annotation** | Predict what should happen; tag prediction errors when they don't |
+| **V4.2** | **Conditioned Dispositions** | (condition, prediction, error_history) tuples replacing flat facts |
+| **V4.3** | **Error-Activated Retrieval** | Beta — error signal closes the learning loop |
 
-> **V4.3 (Error-Activated Retrieval, beta) is active.** Tag: `v4.3.0-beta`
-> Run `python phase3/impl/verify_annotation.py` to check signal quality after a few days of data accumulation.
+> **V4.3.0-beta is active** (2026-05-20). Daily self-journal runs at 02:00, daily synthesis at 06:00.
+> Run `python phase3/impl/verify_annotation.py` to audit annotation signal quality.
 
 ## What Hermem Actually Does
 
 ```
-Daily cron (6:00 + 18:00)
+Session ends
     ↓
-Scan new sessions from Hermes state.db
-    ↓ extract (Ollama LLM, qwen2.5:3b)
-L1: Atomic facts → SQLite l0_l3.db (vector BLOB)
+L0: Raw transcript archived (JSON, 500MB GC)
+    ↓
+L1: Atomic facts extracted (MiniMax-M2.7)
     ↓ aggregate (embedding similarity ≥ 0.75)
-L2: Scene clusters (topic groups with occurrence counts)
+L2: Scene clusters
     ↓ stage (preference-type facts)
-L3: Staging → user_profile.md confirmation
+L3: user_profile.md confirmation
+    ↓
+Intent Classification (13 intents) → routes to disposition update or retrieval
+    ↓
+Disposition: (condition, prediction, error_count, success_count)
+    ↓ daily synthesis
+Active Memory ← learnings + social learnings fed back to next prompt
 ```
 
-Current data: **~1145 L1 chunks, 22 L1 dispositions (6 model_error + 16 user_behavior), ~30 L2 scenes** (as of 2026-05-20).
+Current data: **1121 L1 facts, 22 dispositions (6 model_error + 16 user_behavior), 80 L2 scenes** (as of 2026-05-20).
 
 ## Phase 4 — Predictive Memory (V4)
 
@@ -36,10 +44,12 @@ V4 rethinks memory as a **generative model** rather than stored text. Instead of
 ```
 Context → Predict what should happen → Compare to what actually happens
                                                     ↓
-                                          Error signal → Update model
+                                          Error signal → Update disposition
+                                                    ↓
+                                          Daily synthesis → Active memory
 ```
 
-### V4.1 — Error Annotation (active)
+### V4.1 — Error Annotation
 
 After each session, annotate L0 with prediction errors the assistant made:
 - `prediction_errors[]`: falsifiable predictions that were violated
@@ -48,49 +58,91 @@ After each session, annotate L0 with prediction errors the assistant made:
 - `overall_quality_score`: session-level prediction quality (0–1)
 
 Annotation runs **asynchronously** (background queue, does not block session processing).
-Run `python phase3/impl/verify_annotation.py` to audit signal quality.
+**Model**: MiniMax-M2.7 with `x-no-think: true` header (migrated from qwen2.5:3b, 2026-05-20).
 
-### V4.2 — Conditioned Dispositions (active)
+### V4.2 — Conditioned Dispositions
 
 Replace propositional L1 facts with `(condition, prediction, confidence, error_history)`. After V4.1 annotates a session with prediction errors, V4.2 stores the corrected behavior pattern as a conditioned disposition:
 
 - `condition_text`: when does this pattern activate?
 - `prediction_text`: what does the user expect?
 - `condition_embedding`: semantic index for retrieval
-- `confidence`: initial confidence from extraction evidence
+- `error_count` / `success_count`: tracks prediction accuracy over time
+- `disposition_decay`: time × frequency joint decay (7-day half-life)
 
-Dispositions are extracted by `extract_dispositions()` from session summaries (LLM, confidence ≥ 0.6 required). Retrieved in parallel with L1 facts via `vector_search_dispositions()` — ranked by cosine similarity against the current query's condition embedding.
+### V4.3 — Error-Activated Retrieval (beta)
 
-In HermemMemoryProvider, `sync_turn()` detects corrections via three-tier detection (strong keyword / medium cosine / weak negation heuristic) and activates matching dispositions for the next turn. Active dispositions decay after 2 turns of no correction signal.
+V4.3 completes the error-driven learning loop.
 
-Run `python phase3/v4_2_migrate.py` to expand the disposition dataset from new sessions.
+**Architecture — Intent Classification (B2):**
 
-### V4.3 — Error-Activated Retrieval (beta — `v4.3.0-beta`)
+独立 LLM 调用做意图分类，13 种意图 + 两层判断架构：
 
-V4.3 在 V4.2 的基础上完成了误差驱动的学习闭环。
+| 意图 | 描述 | 处置 |
+|---|---|---|
+| 学习 | 想学习/理解某概念 | 触发 recall 模式 |
+| 执行 | 明确任务指令 | 直接执行 |
+| 修正 | 纠正 Hermem 错误 | 更新 disposition |
+| 结束/关闭 | 阶段性收尾 | 更新会话摘要 |
+| 反馈 | 提供意见/评价 | 触发轻量标注 |
+| 确认 | 确认/批准某事 | 路由到执行 |
+| 建议 | 提出建议 | 记录为 preference |
+| 记忆 | 存储/检索记忆 | 调用 Hermem |
+| 修改 | 修改/编辑内容 | 执行修改 |
+| 停止 | 停止当前操作 | 中断任务流 |
+| 提问 | 提出问题 | 直接回答 |
+| 咨询 | 寻求意见/建议 | 生成建议 |
+| 评估 | 判断/评估某事 | 提供分析 |
 
-**已完成：**
+**8 Trigger Conditions (Annotation Coverage):**
+
+| 触发 | 类型 | 信号质量 |
+|---|---|---|
+| A1 用户明确否定 | strong | ✅ 清晰 |
+| A2 用户部分纠正（"但是"、"但"） | strong | ✅ 清晰 |
+| B1 Agent 自修正（"等等我修正"、"重新回答"） | strong | ✅ 清晰 |
+| B2 Agent 表达不确定（"不确定"） | medium | ✅ 清晰 |
+| B3 Agent 放弃（"我做不到"、"我无法"） | strong | ✅ 清晰 |
+| C1 LLM 错误 | — | ⚠️ 待 gateway 集成 |
+| C2 工具错误 | — | ⚠️ 待 gateway 集成 |
+| C3 session 结束兜底 | — | ✅ 已生效 |
+
+C3 兜底把 annotation 覆盖率从 6.7% 提升至接近 100%（session 结束时无条件触发）。
+
+**Daily Synthesis + Active Memory Loop:**
+
+参考 yoyo-evolve 的设计（"A Truman Show of a self-evolving AI coding agent"）：
+
+- **每日 02:00 — Self-Journal**：读取当天所有 L0 session，总结学到的 pattern、犯的错误、解决的疑问，写入 journal 文件
+- **每日 06:00 — Synthesis**：压缩 learnings + social learnings 进 active memory，再喂回下一轮 prompt
+- **反馈循环**：journal output 再注入 disposition 系统，形成持续进化的记忆层
+
+**Completed:**
 
 - **B1** — `update_dispositions_from_errors()` 按 error_type 匹配 disposition 并递增 error_count
-- **B4** — 同步 annotation 路径（`sync_turn()` → `annotate_l0_after_l1_v2()` → `update_dispositions_from_errors()`，同一轮内立即生效）
-- **B5** — scope 过滤：disposition 表加 `scope` 列（`model_error` vs `user_behavior`），检索时隔离
-- **B6** — Disposition 衰减机制：时间半衰期（7天）× 频次衰减，高频 disposition 权重更高
+- **B2** — Intent Classifier：13 意图分类 + 两层判断架构
+- **B4** — 同步 annotation 路径（`sync_turn()` → `annotate_l0_after_l1_v2()` → `update_dispositions_from_errors()`）
+- **B5** — scope 过滤：disposition 表 `scope` 列（`model_error` vs `user_behavior`），检索时隔离
+- **B6** — Disposition 衰减机制：时间半衰期（7天）× 频次衰减
 - **B8** — 三维权召回 ranking：`score = sim × f_time × min(error_count, 5)`
 - **B9** — few-shot 示例：8个示例覆盖全 5 种 error_type + 反例 + 边界 case
+- **C3** — session 结束兜底 annotation，覆盖率从 6.7% 提升
 
-**待完成（pending success_count 积累）：**
+**Pending:**
 
 - **B3** — 动态 threshold：需要 success_count > 0 才能建立 error_count/success_count 分布
 - **B7** — 多 error_type 权重：依赖 B3 动态 threshold 输出
+- **C1/C2** — `on_llm_error()`/`on_tool_error()` 钩子：需要 gateway 支持
 
-**待完成（P2 阶段）：**
+**P2:**
 
 - **B10** — 跨 session 误差模式
 - **B11** — token 成本监控
 
 ## Requirements
 
-- Ollama (`localhost:11434`) — bge-m3 for embeddings, qwen2.5:3b for extraction
+- Ollama (`localhost:11434`) — bge-m3 for embeddings
+- MiniMax API key (`MINIMAX_CN_API_KEY` in `~/.hermes/.env`) — for error annotation + LLM calls
 - SQLite 3 (built into Python stdlib)
 
 ## Quick Start
@@ -102,7 +154,7 @@ cd hermem
 # Initialize L1/L2/L3 tables
 python phase3/impl/db_init.py
 
-# Run daily processing (optional — sets up cron at 6:00 and 18:00)
+# Run daily pipeline (sets up cron: journal at 02:00, synthesis at 06:00)
 python phase3/cron_daily.py
 ```
 
@@ -120,51 +172,49 @@ hermem/
 ├── phase3/                 # ← Active deliverable
 │   ├── SPEC.md
 │   ├── TODO.md
-│   ├── cron_daily.py       # Daily L0→L1→L2→L3 pipeline
+│   ├── cron_daily.py       # Daily: journal(02:00) + L0→L1→L2→L3(06:00)
 │   └── impl/
-│       ├── db_init.py      # Schema: l1_facts, l2_scenes, l3_staging
-│       ├── l0_store.py     # L0 raw session archival + 500MB GC
-│       ├── l1_extract.py   # LLM fact extraction (type/content/tags/value)
-│       ├── l1_search.py    # Semantic vector search + boost post-processing
+│       ├── db_init.py      # Schema: l1_facts, l1_dispositions, l2_scenes, l3_staging
+│       ├── l0_store.py     # L0 raw session archival + annotation + MiniMax routing
+│       ├── l1_extract.py  # LLM fact extraction (type/content/tags/value)
+│       ├── l1_search.py    # Semantic vector search + disposition ranking
 │       ├── l2_aggregate.py # Embedding similarity scene clustering
-│       └── l3_staging.py   # Preference staging → user_profile.md
-└── impl/                   # Legacy Phase 1/2 code (not integrated)
-    ├── database.py
-    ├── embedding.py
-    ├── vectorstore.py
-    ├── retrieval.py
-    └── batch_backfill.py
+│       ├── l3_staging.py   # Preference staging → user_profile.md
+│       ├── utils.py        # call_minimax() with x-no-think header
+│       ├── config.py       # ERROR_ANNOTATION_MODEL = MiniMax-M2.7
+│       └── verify_annotation.py  # Annotation quality audit
+└── plugins/memory/hermem/ # Hermes plugin wrapper (loaded by Hermes gateway)
+    └── __init__.py         # HermemMemoryProvider + 8 trigger conditions + hooks
 ```
 
 ## Phase 3 Key Design Decisions
 
-- **No Hard Filter**: L1 search does NO fact-type filtering — only boost post-processing (`preferred_types × 1.5`)
-- **Small models first**: qwen2.5:3b for extraction (~30s), not qwen3.5:9b (~90s+, times out on M4)
-- **Ollama-only**: No external API calls for inference; MiniMax only used when Hermes itself calls it
-- **Skill-only delivery**: No core Hermes code modification required
+- **No Hard Filter**: L1 search does NO fact-type filtering — only boost post-processing
+- **MiniMax for annotation**: qwen2.5:3b → MiniMax-M2.7 (2026-05-20), enables full Phase3 capabilities
+- **Skill-only delivery**: No core Hermes code modification required for the skill layer
+- **Auditability over performance**: git log, journal, annotations — all publicly auditable
 
 ## Caveats
 
 | Issue | Status |
 |-------|--------|
-| Phase 1/2 skill layer | ✅ `skills/hermem/` (session-summary, memory-warmup, memory-tools) — real, loaded in Hermes |
-| Phase 1/2 plugin layer (`plugins/memory/hermem/`) | ❌ Empty — `memory.provider: hermem` in config points to non-existent plugin |
-| Phase 3 `plugins/memory/hermem/` | ✅ Implemented — HermemMemoryProvider with Hermem Phase 2 backend, registered in Hermes config as `memory.provider: hermem` |
-| V4.1 Error Annotation | ✅ Implemented — async queue + V3 prompt, awaiting data accumulation |
-| V4.2 Conditioned Dispositions | ✅ Implemented — l1_dispositions table, extract_dispositions(), vector_search_dispositions(), three-tier correction detection in HermemMemoryProvider |
-| V4.3 Error-Activated Retrieval | ✅ Beta (`v4.3.0-beta`) — B1/B4/B5/B6/B8/B9 complete, B3/B7 pending success_count |
-| Unit tests | ❌ None — smoke-test only |
+| Phase 1/2 skill layer | ✅ `skills/hermem/` — session-summary, memory-warmup, memory-tools |
+| Phase 3 plugin (`plugins/memory/hermem/`) | ✅ HermemMemoryProvider registered in Hermes config |
+| V4.1 Error Annotation | ✅ MiniMax-M2.7 async queue |
+| V4.2 Conditioned Dispositions | ✅ l1_dispositions table, extract/vector_search/three-tier detection |
+| V4.3 Error-Activated Retrieval | ✅ Beta (v4.3.0-beta) — B1/B2/B4/B5/B6/B8/B9/C3 complete |
+| Intent Classifier (B2) | ✅ 13 intents + 2-layer architecture |
+| Daily Journal + Synthesis Loop | ✅ Cron at 02:00 / 06:00 |
+| C1/C2 gateway hooks | ⚠️ Defined but not called by Hermes gateway yet |
+| Unit tests | ❌ Smoke-test only |
 | CI/CD | ❌ None |
-| Community stars | 0 — personal project, no external users |
-
-**If you want to integrate Hermem as a real memory provider plugin**: the `impl/` code needs to be wrapped in a proper `plugins/memory/hermem/__init__.py` that exposes the `MemoryProvider` ABC. The skill layer is independent of that.
 
 ## Design Principles
 
 - **Minimal dependencies**: Pure Python + SQLite, no heavy runtimes
 - **Plain text storage**: All memories in readable Markdown, auditable and editable
 - **Progressive disclosure**: Load only relevant memory to avoid context overflow
-- **Skill-only delivery**: No core Hermes code modification required
+- **Self-auditing**: yoyo-evolve-style "Truman Show" — git log, journal, annotations all public
 
 ## License
 
