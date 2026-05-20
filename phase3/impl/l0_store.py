@@ -330,12 +330,22 @@ def annotate_l0_after_l1_v2(
 
     for attempt in range(max_retries):
         try:
-            content = llm_generate(
-                prompt,
-                model=annotation_model,
-                temperature=0.2,
-                max_tokens=1024,
-            )
+            # MiniMax vs Ollama 路由
+            if "MiniMax" in annotation_model or "minimax" in annotation_model:
+                from .utils import call_minimax as _call_minimax
+                content = _call_minimax(
+                    prompt=prompt,
+                    model=annotation_model,
+                    temperature=0.2,
+                    max_tokens=1024,
+                )
+            else:
+                content = llm_generate(
+                    prompt=prompt,
+                    model=annotation_model,
+                    temperature=0.2,
+                    max_tokens=1024,
+                )
 
             text = content.strip()
             if text.startswith("```"):
