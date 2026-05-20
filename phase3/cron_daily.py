@@ -94,7 +94,7 @@ def main():
             # L0 存档
             l0_ref = save_l0_raw(
                 sid,
-                [{"role": "auto", "content": content[:5000]}],
+                [{"role": "auto", "content": content[:10000]}],
                 started_dt,
                 ended_dt,
             )
