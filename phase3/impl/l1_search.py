@@ -12,6 +12,45 @@ from .utils import (
     deserialize_vec, json_loads, json_dumps,
     db_query_dict,
 )
+from datetime import datetime as _dt
+
+
+# ── 可测试的 B8 公式（供 vector_search_dispositions 内联调用）───────────────
+
+def calculate_activation_score(
+    sim: float,
+    error_count: int,
+    last_error_at: str | None,
+    half_life_days: float = 7.0,
+    max_error_count_cap: int = 5,
+) -> float:
+    """
+    B8 三维权公式（简化版，无 DB 依赖）。
+
+    score = sim × f_time × min(error_count, cap)
+
+    与 B6 f_freq 解耦：B8 让 error_count 直接参与排序，
+    cap 防止 error_count=100 的 disposition 垄断排序。
+
+    f_time: 指数衰减，半衰期 half_life_days
+    """
+    # f_time
+    if last_error_at:
+        try:
+            last_dt = _dt.fromisoformat(last_error_at.replace("Z", "+00:00"))
+        except ValueError:
+            f_time = 1.0
+        else:
+            now = _dt.now(last_dt.tzinfo) if last_dt.tzinfo else _dt.now()
+            delta_days = (now - last_dt).total_seconds() / 86400.0
+            f_time = 0.5 ** (delta_days / half_life_days)
+    else:
+        f_time = 1.0
+
+    # capped error_count 直接作乘数
+    error_factor = min(error_count, max_error_count_cap)
+
+    return sim * f_time * error_factor, f_time, error_factor
 
 
 def vector_search_l1(query_emb, top_k: int = 20) -> list[dict]:
@@ -120,30 +159,15 @@ def vector_search_dispositions(
             )
 
         # ── B8: activation_score = sim × f_time × min(error_count, cap) ──
-        # 与 B6 的 f_freq 解耦：B8 让 error_count 直接参与排序，
-        # cap 防止单个 disposition 垄断（如 error_count=100 的 disposition）
+        # 与 B6 的 f_freq 解耦：B8 让 error_count 直接参与排序
         error_count = row["error_count"] or 0
-        capped_error = min(error_count, DISPOSITION_MAX_ERROR_COUNT)
-        # f_time 仍然决定时间衰减
-        if row["last_error_at"]:
-            try:
-                last_dt = datetime.fromisoformat(row["last_error_at"].replace("Z", "+00:00"))
-            except ValueError:
-                f_time_ranking = 1.0
-            else:
-                now = datetime.now(last_dt.tzinfo) if last_dt.tzinfo else datetime.now()
-                delta_days = (now - last_dt).total_seconds() / 86400.0
-                f_time_ranking = 0.5 ** (delta_days / DISPOSITION_HALF_LIFE_DAYS)
-        else:
-            f_time_ranking = 1.0
-
-        # error_count=0 → 0.5（抑制），error_count=1 → 1.0，2+ → 线性增长 capped
-        if capped_error == 0:
-            error_factor = 0.5
-        else:
-            error_factor = capped_error
-
-        activation_score = sim * f_time_ranking * error_factor
+        activation_score, f_time_ranking, error_factor = calculate_activation_score(
+            sim=sim,
+            error_count=error_count,
+            last_error_at=row["last_error_at"],
+            half_life_days=DISPOSITION_HALF_LIFE_DAYS,
+            max_error_count_cap=DISPOSITION_MAX_ERROR_COUNT,
+        )
 
         results.append({
             "id":             row["id"],
