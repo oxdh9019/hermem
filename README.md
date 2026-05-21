@@ -6,7 +6,7 @@ Hermes lightweight memory enhancement system — L0–L3 hierarchical memory wit
 
 | Version | Name | Description |
 |---------|------|-------------|
-| V1–V3 | Phase 1–3 | L0→L1→L2→L3 pipeline, semantic search |
+| V1–V3 | Phase 1–3 | L0→L1→L2→L3 pipeline, semantic search — design docs in `phase1/`/`phase2/`/`phase3/` |
 | **V4** | **Predictive Memory** | Phase 4 — memory as generative model, not stored text |
 | **V4.1** | **Error Annotation** | Predict what should happen; tag prediction errors when they don't |
 | **V4.2** | **Conditioned Dispositions** | (condition, prediction, error_history) tuples replacing flat facts |
@@ -14,6 +14,8 @@ Hermes lightweight memory enhancement system — L0–L3 hierarchical memory wit
 | **V4.4** | **Concurrency Fixes** | Vectorstore double-lock, auto_index file lock, watchdog drift monitor |
 
 > **V4.4 is active** (2026-05-21). Vectorstore now has process-safe double locking; watchdog runs every 360m with auto-fix.
+
+---
 
 ## What Hermem Actually Does
 
@@ -35,7 +37,95 @@ Disposition: (condition, prediction, error_count, success_count)
 Active Memory ← learnings + social learnings fed back to next prompt
 ```
 
-Current data: **1264 vectors, 22 dispositions (6 model_error + 16 user_behavior), 80 L2 scenes** (as of 2026-05-21, compact-applied).
+**Current data: 1317 vectors, 22 dispositions (6 model_error + 16 user_behavior), 80 L2 scenes** (as of 2026-05-22).
+
+---
+
+## Directory Structure
+
+```
+hermem/                          # Canonical directory — single git clone of hermem-github/
+│
+├── README.md                    # This file
+├── PROJECT.md                   # Three-phase plan overview + version changelog
+│
+├── phase1/                      # Phase 1 design documents only
+│   ├── SPEC.md
+│   └── REVIEW.md
+│
+├── phase2/                      # Phase 2 design documents only
+│   ├── SPEC.md
+│   └── REVIEW.md
+│
+├── phase3/                     # Phase 3 design + all V1–V4 implementation
+│   ├── SPEC.md                 # Phase 3 specification
+│   ├── TODO.md
+│   ├── cron_daily.py           # Daily pipeline entry (journal 02:00 + synthesis 06:00)
+│   │
+│   ├── impl/                   # ← All active implementation (V1–V4)
+│   │   ├── __init__.py
+│   │   ├── config.py           # Config: model names, paths, constants
+│   │   ├── utils.py            # LLM calls, embeddings, serialization
+│   │   ├── db_init.py          # Schema init: l1_facts, l1_dispositions, l2_scenes, l3_staging
+│   │   ├── database.py         # SQLite helpers
+│   │   ├── l0_store.py         # L0 raw session archival + MiniMax routing
+│   │   ├── l1_extract.py       # LLM fact extraction (type/content/tags/value)
+│   │   ├── l1_search.py        # Semantic vector search + B8 activation score
+│   │   ├── l2_aggregate.py    # Embedding similarity scene clustering
+│   │   ├── l3_staging.py      # Preference staging → user_profile.md
+│   │   ├── disposition_updater.py  # Three-tier error matching + disposition update
+│   │   ├── intent_classifier.py   # 13-intent classifier (B2)
+│   │   ├── vectorstore.py      # Vector storage (npy): double-lock append_vectors
+│   │   ├── retrieval.py        # Semantic + keyword + hybrid search
+│   │   ├── embedding.py       # Ollama bge-m3 embeddings
+│   │   ├── verify_annotation.py  # Annotation quality audit
+│   │   ├── async_annotation.py   # Async annotation queue
+│   │   ├── batch_extract.py   # Batch L1 extraction
+│   │   │
+│   │   ├── test_vector_concurrent.py   # P0 concurrent stress test
+│   │   └── test_auto_index_concurrent.py  # P1 file lock test
+│   │
+│   ├── impl_phase2/            # Phase 2 vectorstore backfill layer
+│   │   ├── __init__.py
+│   │   ├── vectorstore.py     # Phase 2 vector operations
+│   │   ├── database.py
+│   │   ├── embedding.py
+│   │   ├── retrieval.py
+│   │   ├── commands.py         # CLI commands for backfill
+│   │   ├── migrate.py          # Migration scripts
+│   │   └── batch_backfill.py  # Batch backfill tool
+│   │
+│   ├── scripts/                # Operational scripts (cron-called)
+│   │   ├── watchdog_vectorstore.py   # Drift monitor (cron: every 360m)
+│   │   ├── daily_synthesis.py        # Daily synthesis (cron: 06:00)
+│   │   ├── journal.py                 # Daily self-journal (cron: 02:00)
+│   │   ├── process_turn_judgments.py # V4.4 per-turn judgment processor
+│   │   ├── generate_dispositions_from_annotations.py  # V4.3 seed dispositions
+│   │   ├── backfill_vectors.py       # Vector backfill helper
+│   │   └── rebuild_vectorstore.py     # Compact + remap rebuild tool
+│   │
+│   ├── eval/                   # Evaluation scripts
+│   │   ├── eval_compare.py            # Model comparison eval
+│   │   ├── eval_qwen35_4b.py          # qwen3.5:4b eval
+│   │   ├── per_turn_judgment_eval.py  # Per-turn judgment quality eval
+│   │   └── test_l1_extraction.py      # L1 extraction quality test
+│   │
+│   ├── tests/                  # Test suite
+│   │   ├── unit/
+│   │   │   ├── test_disposition_updater.py  # 25 cases
+│   │   │   ├── test_intent_classifier.py     # 75 cases (3 pre-existing gaps)
+│   │   │   └── test_l1_search.py             # 16 cases (B8 formula)
+│   │   └── test_phase2c_pending_recall.py
+│   │
+│   ├── test_intent_coverage.py
+│   ├── openclaw_import.py      # OpenClaw disposition import
+│   └── v4_2_migrate.py         # V4.2 migration script
+│
+└── plugins/memory/hermem/       # Hermes gateway plugin wrapper
+    └── __init__.py             # HermemMemoryProvider + 8 trigger conditions
+```
+
+---
 
 ## Phase 4 — Predictive Memory (V4)
 
@@ -58,7 +148,7 @@ After each session, annotate L0 with prediction errors the assistant made:
 - `overall_quality_score`: session-level prediction quality (0–1)
 
 Annotation runs **asynchronously** (background queue, does not block session processing).
-**Model**: MiniMax-M2.7 with `x-no-think: true` header (migrated from qwen2.5:3b → qwen3.5:2b, 2026-05-21).
+**Model**: MiniMax-M2.7 with `x-no-think: true` header.
 
 ### V4.2 — Conditioned Dispositions
 
@@ -74,9 +164,7 @@ Replace propositional L1 facts with `(condition, prediction, confidence, error_h
 
 V4.3 completes the error-driven learning loop.
 
-**Architecture — Intent Classification (B2):**
-
-独立 LLM 调用做意图分类，13 种意图 + 两层判断架构：
+**Intent Classification (B2):** 13 intents + two-layer architecture.
 
 | 意图 | 描述 | 处置 |
 |---|---|---|
@@ -94,7 +182,7 @@ V4.3 completes the error-driven learning loop.
 | 咨询 | 寻求意见/建议 | 生成建议 |
 | 评估 | 判断/评估某事 | 提供分析 |
 
-**8 Trigger Conditions (Annotation Coverage):**
+**8 Trigger Conditions:**
 
 | 触发 | 类型 | 信号质量 |
 |---|---|---|
@@ -107,64 +195,24 @@ V4.3 completes the error-driven learning loop.
 | C2 工具错误 | — | ⚠️ 待 gateway 集成 |
 | C3 session 结束兜底 | — | ✅ 已生效 |
 
-C3 兜底把 annotation 覆盖率从 6.7% 提升至接近 100%（session 结束时无条件触发）。
+**Daily Loop:**
+- **02:00 — Self-Journal**: reads all L0 sessions of the day, writes patterns/errors/solutions to journal
+- **06:00 — Synthesis**: compresses learnings into active memory for next prompt
+- **Feedback**: journal output re-injects into disposition system
 
-**Daily Synthesis + Active Memory Loop:**
+**Completed:** B1, B2, B4, B5, B6, B8, B9, C3
 
-参考 yoyo-evolve 的设计（"A Truman Show of a self-evolving AI coding agent"）：
+**Pending:** B3 (dynamic threshold), B7 (multi-error weights), C1/C2 (gateway hooks)
 
-- **每日 02:00 — Self-Journal**：读取当天所有 L0 session，总结学到的 pattern、犯的错误、解决的疑问，写入 journal 文件
-- **每日 06:00 — Synthesis**：压缩 learnings + social learnings 进 active memory，再喂回下一轮 prompt
-- **反馈循环**：journal output 再注入 disposition 系统，形成持续进化的记忆层
+### V4.4 — Concurrency Fixes (2026-05-21)
 
-**Completed:**
+| Phase | Feature | Status |
+|-------|---------|--------|
+| P0 | `append_vectors()` double-lock: `threading.Lock` + `fcntl.flock` | ✅ |
+| P1 | `hermem_auto_index_all.py` file lock around `main()` | ✅ |
+| P2 | `watchdog_vectorstore.py`: drift detection + `--fix` auto-repair, cron every 360m | ✅ |
 
-- **B1** — `update_dispositions_from_errors()` 按 error_type 匹配 disposition 并递增 error_count
-- **B2** — Intent Classifier：13 意图分类 + 两层判断架构
-- **B4** — 同步 annotation 路径（`sync_turn()` → `annotate_l0_after_l1_v2()` → `update_dispositions_from_errors()`）
-- **B5** — scope 过滤：disposition 表 `scope` 列（`model_error` vs `user_behavior`），检索时隔离
-- **B6** — Disposition 衰减机制：时间半衰期（7天）× 频次衰减
-- **B8** — 三维权召回 ranking：`score = sim × f_time × min(error_count, 5)`
-- **B9** — few-shot 示例：8个示例覆盖全 5 种 error_type + 反例 + 边界 case
-- **C3** — session 结束兜底 annotation，覆盖率从 6.7% 提升
-
-**Pending:**
-
-- **B3** — 动态 threshold：需要 success_count > 0 才能建立 error_count/success_count 分布
-- **B7** — 多 error_type 权重：依赖 B3 动态 threshold 输出
-- **C1/C2** — `on_llm_error()`/`on_tool_error()` 钩子：需要 gateway 支持
-
-**P2:**
-
-- **B10** — 跨 session 误差模式
-- **B11** — token 成本监控
-
-## V4.4 — Concurrency Fixes (2026-05-21)
-
-**P0: Double Locking for append_vectors()**
-
-- `threading.Lock` (process-local) + `fcntl.flock` (inter-process) dual protection
-- 9 rounds multi-process concurrent stress test: drift=0, 100% pass
-
-**P1: auto_index File Lock**
-
-- `hermem_auto_index_all.py`: `fcntl.flock` wraps `main()`, prevents concurrent overwrites
-- Script: `phase3/scripts/hermem_auto_index_all.py`
-
-**P2: Watchdog Drift Monitor**
-
-- `watchdog_vectorstore.py`: detects drift between `hermem_vectors.npy` and `hermem.db` chunk refs
-- `--fix` flag auto-truncates orphan vectors and remaps chunk.vec_index
-- Cron: every 360 minutes, auto-fix then report to home channel
-- Script: `phase3/scripts/watchdog_vectorstore.py`
-
-**New Components:**
-
-- `phase3/impl_phase2/`: Phase 2 vectorstore layer (batch_backfill, commands, database, embedding, migrate, retrieval, vectorstore)
-- `phase3/eval/`: Per-turn judgment evaluation suite (eval_compare, eval_qwen35_4b, per_turn_judgment_eval, test_l1_extraction)
-- `phase3/scripts/rebuild_vectorstore.py`: Compact + remap rebuild tool for drift repair
-- `phase3/scripts/journal.py`: Daily self-journal script (02:00)
-- `phase3/scripts/daily_synthesis.py`: Daily synthesis script (06:00)
+---
 
 ## Requirements
 
@@ -179,70 +227,37 @@ git clone https://github.com/oxdh9019/hermem.git
 cd hermem
 
 # Initialize L1/L2/L3 tables
-python phase3/impl/db_init.py
+python3 phase3/impl/db_init.py
 
-# Run daily pipeline (sets up cron: journal at 02:00, synthesis at 06:00)
-python phase3/cron_daily.py
+# Run daily pipeline (journal 02:00 + synthesis 06:00)
+python3 phase3/cron_daily.py
 ```
 
-## Project Structure
-
-```
-hermem/
-├── PROJECT.md              # Three-phase plan overview
-├── phase1/                 # Session summarization + warmup (design only)
-│   ├── SPEC.md
-│   └── REVIEW.md
-├── phase2/                 # Semantic search design (design only)
-│   ├── SPEC.md
-│   └── REVIEW.md
-├── phase3/                 # ← Active deliverable
-│   ├── SPEC.md
-│   ├── TODO.md
-│   ├── cron_daily.py       # Daily: journal(02:00) + L0→L1→L2→L3(06:00)
-│   └── impl/
-│       ├── db_init.py      # Schema: l1_facts, l1_dispositions, l2_scenes, l3_staging
-│       ├── l0_store.py     # L0 raw session archival + annotation + MiniMax routing
-│       ├── l1_extract.py  # LLM fact extraction (type/content/tags/value)
-│       ├── l1_search.py    # Semantic vector search + disposition ranking
-│       ├── l2_aggregate.py # Embedding similarity scene clustering
-│       ├── l3_staging.py   # Preference staging → user_profile.md
-│       ├── utils.py        # call_minimax() with x-no-think header
-│       ├── config.py       # ERROR_ANNOTATION_MODEL = MiniMax-M2.7
-│       └── verify_annotation.py  # Annotation quality audit
-└── plugins/memory/hermem/ # Hermes plugin wrapper (loaded by Hermes gateway)
-    └── __init__.py         # HermemMemoryProvider + 8 trigger conditions + hooks
-```
-
-## Phase 3 Key Design Decisions
-
-- **No Hard Filter**: L1 search does NO fact-type filtering — only boost post-processing
-- **LLM for extraction**: qwen2.5:3b → qwen3.5:2b (2026-05-21), qwen3.5 routes via native API + think:false
-- **MiniMax for annotation**: qwen2.5:3b → MiniMax-M2.7 (2026-05-20), enables full Phase3 capabilities
-- **Skill-only delivery**: No core Hermes code modification required for the skill layer
-- **Auditability over performance**: git log, journal, annotations — all publicly auditable
+---
 
 ## Outstanding Issues
 
 | Issue | Notes | Revisit After |
 |-------|-------|---------------|
-| **B3 is_recurring_cross_session bypass** | BLOCKED — all error annotations map to 2-3 broad disposition buckets; no granularity to distinguish recurring vs isolated. Also: success_count=0 (all annotations flagged as errors, no success path ever reached). | V4.4 per-turn judgment provides finer-grained data |
+| **B3 is_recurring_cross_session bypass** | BLOCKED — all error annotations map to 2-3 broad disposition buckets; success_count=0 (all annotations flagged as errors, no success path ever reached). | V4.4 per-turn judgment provides finer-grained data |
 
 ## Caveats
 
 | Issue | Status |
 |-------|--------|
-| Phase 1/2 skill layer | ✅ `skills/hermem/` — session-summary, memory-warmup, memory-tools |
+| Phase 1/2 skill layer | ✅ `skills/hermem/` |
 | Phase 3 plugin (`plugins/memory/hermem/`) | ✅ HermemMemoryProvider registered in Hermes config |
 | V4.1 Error Annotation | ✅ MiniMax-M2.7 async queue |
 | V4.2 Conditioned Dispositions | ✅ l1_dispositions table, extract/vector_search/three-tier detection |
 | V4.3 Error-Activated Retrieval | ✅ Beta (v4.3.0-beta) — B1/B2/B4/B5/B6/B8/B9/C3 complete |
-| V4.4 Concurrency Fixes | ✅ P0/P1/P2 complete — double-lock, auto_index lock, watchdog with auto-fix |
+| V4.4 Concurrency Fixes | ✅ P0/P1/P2 complete |
 | Intent Classifier (B2) | ✅ 13 intents + 2-layer architecture |
 | Daily Journal + Synthesis Loop | ✅ Cron at 02:00 / 06:00 |
 | C1/C2 gateway hooks | ⚠️ Defined but not called by Hermes gateway yet |
-| Unit tests | ❌ Smoke-test only |
+| Unit tests | ⚠️ 116 passed, 3 failed (intent_classifier trigger gaps — pre-existing) |
 | CI/CD | ❌ None |
+
+---
 
 ## Design Principles
 
