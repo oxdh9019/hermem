@@ -250,12 +250,11 @@ user_profile.md (confirmed preferences)
 
 ### 实施状态
 
-✅ 全部完成（2026-05-16）
+✅ 全部完成（2026-05-16），持续迭代中
 - `phase3/impl/`: 完整实现（db_init, l0_store, l0_load, l1_extract, l1_search, l2_aggregate, l3_staging）
-- `phase3/cron_daily.py`: 定时处理脚本（每天 6:00 和 18:00）
-- cron job: `a70a7eb3bf8d`
-- 当前数据: 316 L1 facts, 41 L2 scenes, 0 L3 staging（等待新会话 preference facts）
-- 配合 `git status` 确认当前状态
+- `phase3/cron_daily.py`: 定时处理脚本（每天 02:00 journal + 06:00 synthesis）
+- cron job: `a70a7eb3bf8d`（journal at 02:00, synthesis at 06:00）
+- 当前数据: **1264 vectors, 22 dispositions (6 model_error + 16 user_behavior), 80 L2 scenes** (2026-05-21, compact-applied)
 ```
 
 ### 实施步骤
@@ -281,3 +280,8 @@ user_profile.md (confirmed preferences)
 |------|------|----------|
 | 2026-04-28 | v0.1 | 初始化项目文档，建立三阶段规划 |
 | 2026-05-16 | v1.0 | Phase 3 全部完成（L0-L3 分层记忆系统 + 定时 cron） |
+| 2026-05-19 | V4.0 | Phase 4 — Predictive Memory 启动；memory as generative model |
+| 2026-05-19 | V4.1 | Error Annotation — predict what should happen, tag errors when they don't |
+| 2026-05-20 | V4.2 | Conditioned Dispositions — (condition, prediction, error_history) tuples |
+| 2026-05-20 | V4.3 | Error-Activated Retrieval beta — error signal closes the learning loop; B1/B2/B4/B5/B6/B8/B9/C3 complete |
+| 2026-05-21 | V4.4 | Concurrency Fixes — vectorstore double-lock (P0), auto_index file lock (P1), watchdog drift monitor with auto-fix (P2) |
