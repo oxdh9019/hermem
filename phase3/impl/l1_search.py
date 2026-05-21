@@ -160,27 +160,13 @@ def vector_search_dispositions(
         # 与 B6 的 f_freq 解耦：B8 让 error_count 直接参与排序，
         # cap 防止单个 disposition 垄断（如 error_count=100 的 disposition）
         error_count = row["error_count"] or 0
-        capped_error = min(error_count, DISPOSITION_MAX_ERROR_COUNT)
-        # f_time 仍然决定时间衰减
-        if row["last_error_at"]:
-            try:
-                last_dt = _dt.fromisoformat(row["last_error_at"].replace("Z", "+00:00"))
-            except ValueError:
-                f_time_ranking = 1.0
-            else:
-                now = _dt.now(last_dt.tzinfo) if last_dt.tzinfo else _dt.now()
-                delta_days = (now - last_dt).total_seconds() / 86400.0
-                f_time_ranking = 0.5 ** (delta_days / DISPOSITION_HALF_LIFE_DAYS)
-        else:
-            f_time_ranking = 1.0
-
-        # error_count=0 → 0.5（抑制），error_count=1 → 1.0，2+ → 线性增长 capped
-        if capped_error == 0:
-            error_factor = 0.5
-        else:
-            error_factor = capped_error
-
-        activation_score = sim * f_time_ranking * error_factor
+        activation_score, f_time_ranking, error_factor = calculate_activation_score(
+            sim=sim,
+            error_count=error_count,
+            last_error_at=row["last_error_at"],
+            half_life_days=DISPOSITION_HALF_LIFE_DAYS,
+            max_error_count_cap=DISPOSITION_MAX_ERROR_COUNT,
+        )
 
         results.append({
             "id":             row["id"],

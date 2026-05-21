@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS l1_facts (
     value           TEXT NOT NULL,
     chunk_vector    BLOB NOT NULL,
     created_at      TEXT NOT NULL,
-    status          TEXT DEFAULT 'active'
+    status          TEXT DEFAULT 'active',
+    source          TEXT DEFAULT 'l0'
 )
 """)
 conn.execute("CREATE INDEX IF NOT EXISTS idx_l1_status ON l1_facts(status)")

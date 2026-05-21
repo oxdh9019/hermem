@@ -1,0 +1,16 @@
+[project]
+name = "hermem"
+version = "4.4.0"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "requests",
+    "ollama",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["phase3/tests"]
+pythonpath = ["phase3"]
