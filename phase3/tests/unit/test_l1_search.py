@@ -26,12 +26,12 @@ class TestActivationScore_ErrorFactor:
     """error_count cap 对 score 的影响"""
 
     def test_error_count_zero_suppresses(self):
-        """error_count=0 → capped=0 → score=0"""
+        """error_count=0 → capped=0 → ef=0.5（抑制），score = sim × 1.0 × 0.5"""
         score, f_time, ef = calculate_activation_score(
             sim=0.8, error_count=0, last_error_at=None
         )
-        assert ef == 0
-        assert score == 0.0
+        assert ef == 0.5   # 0 被抑制为 0.5，不是 0
+        assert score == 0.4   # 0.8 × 1.0 × 0.5
 
     def test_error_count_one_neutral(self):
         """error_count=1 → capped=1 → score = sim × f_time"""
@@ -121,7 +121,10 @@ class TestActivationScore_Combined:
         score = calculate_activation_score(
             sim=0.3, error_count=0, last_error_at=old
         )[0]
-        assert score == 0.0  # error_count=0 caps to 0
+        # error_count=0 → ef=0.5，30天 → f_time ≈ 0.063
+        # score ≈ 0.3 × 0.063 × 0.5 ≈ 0.0095（很小但非0）
+        assert score < 0.02
+        assert score > 0
 
     def test_score_increases_with_error_count(self):
         """相同 sim + 时间，error_count 越高 score 越高"""

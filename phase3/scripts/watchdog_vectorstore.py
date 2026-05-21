@@ -11,7 +11,7 @@ watchdog_vectorstore.py — 向量存储 drift 监控脚本
   python3 watchdog_vectorstore.py [--fix] [--log PATH]
 
 依赖：
-  ~/.hermes/projects/hermem/impl/vectorstore.py
+  phase3/impl/vectorstore.py
 """
 
 import argparse
@@ -19,7 +19,7 @@ import json
 import sys
 from pathlib import Path
 
-# 添加 impl 路径（scripts/ → hermem/）
+# 添加 phase3 路径（scripts/ → phase3/）
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from impl.vectorstore import check_drift
 
@@ -82,7 +82,6 @@ def auto_fix(result: dict):
         _invalidate_cache()
 
         # 验证
-        from impl.vectorstore import check_drift
         verify = check_drift()
         if verify["ok"]:
             print(f"修复成功：{verify['message']}")

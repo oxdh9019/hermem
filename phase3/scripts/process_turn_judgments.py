@@ -24,7 +24,7 @@ from pathlib import Path
 
 # ── Setup ───────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parents[2]  # phase3/scripts/ -> phase3/ -> projects/hermem-github
-sys.path.insert(0, str(ROOT / "phase3"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from impl.config import DB_PATH, L1_EXTRACT_PROMPT
 from impl.utils import get_embeddings_batch, llm_generate, serialize_vec, json_dumps
 

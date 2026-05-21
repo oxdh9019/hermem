@@ -6,7 +6,7 @@ V4.2 迁移脚本：从 L0 JSON 文件批量提取 dispositions。
 """
 import sys, json, re
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent / "phase3"))
+sys.path.insert(0, str(Path(__file__).parent))
 
 from impl.config import DB_PATH
 from impl.l1_extract import extract_dispositions

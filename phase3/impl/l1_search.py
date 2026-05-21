@@ -5,13 +5,50 @@ Step 3b: vector_search_l1() — 纯语义，无类型过滤
 Step 3c: retrieve() — 后处理 boost（替代硬过滤）
 """
 import json as json_lib
-from datetime import datetime
+from datetime import datetime as _dt
 from .config import DB_PATH
 from .utils import (
     get_embedding, cosine_sim,
     deserialize_vec, json_loads, json_dumps,
     db_query_dict,
 )
+
+
+# ── B8 公式（可测试的独立函数）────────────────────────────────────
+def calculate_activation_score(
+    sim: float,
+    error_count: int,
+    last_error_at: str | None,
+    half_life_days: float = 7.0,
+    max_error_count_cap: int = 5,
+):
+    """
+    B8 三维权公式（简化版，无 DB 依赖）。
+
+    score = sim × f_time × min(error_count, cap)
+
+    cap 防止 error_count=100 的 disposition 垄断排序。
+    error_count=0 → 0.5（抑制），error_count=1 → 1.0，2+ → cap 上限。
+
+    f_time: 指数衰减，半衰期 half_life_days
+    Returns: (score, f_time, error_factor)
+    """
+    if last_error_at:
+        try:
+            last_dt = _dt.fromisoformat(last_error_at.replace("Z", "+00:00"))
+        except ValueError:
+            f_time = 1.0
+        else:
+            now = _dt.now(last_dt.tzinfo) if last_dt.tzinfo else _dt.now()
+            delta_days = (now - last_dt).total_seconds() / 86400.0
+            f_time = 0.5 ** (delta_days / half_life_days)
+    else:
+        f_time = 1.0
+
+    capped_error = min(error_count, max_error_count_cap)
+    error_factor = 0.5 if capped_error == 0 else capped_error
+
+    return sim * f_time * error_factor, f_time, error_factor
 
 
 def vector_search_l1(query_emb, top_k: int = 20) -> list[dict]:
@@ -127,11 +164,11 @@ def vector_search_dispositions(
         # f_time 仍然决定时间衰减
         if row["last_error_at"]:
             try:
-                last_dt = datetime.fromisoformat(row["last_error_at"].replace("Z", "+00:00"))
+                last_dt = _dt.fromisoformat(row["last_error_at"].replace("Z", "+00:00"))
             except ValueError:
                 f_time_ranking = 1.0
             else:
-                now = datetime.now(last_dt.tzinfo) if last_dt.tzinfo else datetime.now()
+                now = _dt.now(last_dt.tzinfo) if last_dt.tzinfo else _dt.now()
                 delta_days = (now - last_dt).total_seconds() / 86400.0
                 f_time_ranking = 0.5 ** (delta_days / DISPOSITION_HALF_LIFE_DAYS)
         else:
