@@ -11,9 +11,9 @@ Hermes lightweight memory enhancement system — L0–L3 hierarchical memory wit
 | **V4.1** | **Error Annotation** | Predict what should happen; tag prediction errors when they don't |
 | **V4.2** | **Conditioned Dispositions** | (condition, prediction, error_history) tuples replacing flat facts |
 | **V4.3** | **Error-Activated Retrieval** | Beta — error signal closes the learning loop |
+| **V4.4** | **Concurrency Fixes** | Vectorstore double-lock, auto_index file lock, watchdog drift monitor |
 
-> **V4.3.0-beta is active** (2026-05-20). Daily self-journal runs at 02:00, daily synthesis at 06:00.
-> Run `python phase3/impl/verify_annotation.py` to audit annotation signal quality.
+> **V4.4 is active** (2026-05-21). Vectorstore now has process-safe double locking; watchdog runs every 360m with auto-fix.
 
 ## What Hermem Actually Does
 
@@ -35,7 +35,7 @@ Disposition: (condition, prediction, error_count, success_count)
 Active Memory ← learnings + social learnings fed back to next prompt
 ```
 
-Current data: **1121 L1 facts, 22 dispositions (6 model_error + 16 user_behavior), 80 L2 scenes** (as of 2026-05-20).
+Current data: **1264 vectors, 22 dispositions (6 model_error + 16 user_behavior), 80 L2 scenes** (as of 2026-05-21, compact-applied).
 
 ## Phase 4 — Predictive Memory (V4)
 
@@ -139,6 +139,33 @@ C3 兜底把 annotation 覆盖率从 6.7% 提升至接近 100%（session 结束�
 - **B10** — 跨 session 误差模式
 - **B11** — token 成本监控
 
+## V4.4 — Concurrency Fixes (2026-05-21)
+
+**P0: Double Locking for append_vectors()**
+
+- `threading.Lock` (process-local) + `fcntl.flock` (inter-process) dual protection
+- 9 rounds multi-process concurrent stress test: drift=0, 100% pass
+
+**P1: auto_index File Lock**
+
+- `hermem_auto_index_all.py`: `fcntl.flock` wraps `main()`, prevents concurrent overwrites
+- Script: `phase3/scripts/hermem_auto_index_all.py`
+
+**P2: Watchdog Drift Monitor**
+
+- `watchdog_vectorstore.py`: detects drift between `hermem_vectors.npy` and `hermem.db` chunk refs
+- `--fix` flag auto-truncates orphan vectors and remaps chunk.vec_index
+- Cron: every 360 minutes, auto-fix then report to home channel
+- Script: `phase3/scripts/watchdog_vectorstore.py`
+
+**New Components:**
+
+- `phase3/impl_phase2/`: Phase 2 vectorstore layer (batch_backfill, commands, database, embedding, migrate, retrieval, vectorstore)
+- `phase3/eval/`: Per-turn judgment evaluation suite (eval_compare, eval_qwen35_4b, per_turn_judgment_eval, test_l1_extraction)
+- `phase3/scripts/rebuild_vectorstore.py`: Compact + remap rebuild tool for drift repair
+- `phase3/scripts/journal.py`: Daily self-journal script (02:00)
+- `phase3/scripts/daily_synthesis.py`: Daily synthesis script (06:00)
+
 ## Requirements
 
 - Ollama (`localhost:11434`) — bge-m3 for embeddings
@@ -210,7 +237,7 @@ hermem/
 | V4.1 Error Annotation | ✅ MiniMax-M2.7 async queue |
 | V4.2 Conditioned Dispositions | ✅ l1_dispositions table, extract/vector_search/three-tier detection |
 | V4.3 Error-Activated Retrieval | ✅ Beta (v4.3.0-beta) — B1/B2/B4/B5/B6/B8/B9/C3 complete |
-| V4.4 Per-Turn Judgment | 🚧 Phase1 in progress — few-shot prompt + sync_turn integration |
+| V4.4 Concurrency Fixes | ✅ P0/P1/P2 complete — double-lock, auto_index lock, watchdog with auto-fix |
 | Intent Classifier (B2) | ✅ 13 intents + 2-layer architecture |
 | Daily Journal + Synthesis Loop | ✅ Cron at 02:00 / 06:00 |
 | C1/C2 gateway hooks | ⚠️ Defined but not called by Hermes gateway yet |
