@@ -26,12 +26,20 @@ JOURNAL_DIR = HERMEM_HOME / "journal"
 LEARNINGS   = HERMEM_HOME / "active_learnings_daily.md"
 JOURNAL_DIR.mkdir(exist_ok=True)
 
-# MiniMax (from hermes auth.json credential pool)
-_AUTH_PATH = Path.home() / ".hermes" / "auth.json"
-_cred = json.loads(_AUTH_PATH.read_text())
-_minimax_creds = _cred["credential_pool"]["minimax-cn"][0]
-MINIMAX_API_KEY = _minimax_creds["access_token"]
-MINIMAX_BASE_URL = "https://api.minimaxi.com/anthropic"  # from auth.json
+# MiniMax (lazy load from hermes auth.json credential pool)
+def _get_minimax_credentials() -> dict:
+    _AUTH_PATH = Path.home() / ".hermes" / "auth.json"
+    if not _AUTH_PATH.exists():
+        raise RuntimeError(f"auth.json not found at {_AUTH_PATH}")
+    _cred = json.loads(_AUTH_PATH.read_text())
+    return _cred["credential_pool"]["minimax-cn"][0]
+
+def _get_llm_client():
+    creds = _get_minimax_credentials()
+    MINIMAX_API_KEY = creds["access_token"]
+    MINIMAX_BASE_URL = "https://api.minimaxi.com/anthropic"
+    return MINIMAX_API_KEY, MINIMAX_BASE_URL
+
 LLM_MODEL = "MiniMax-M2.7"
 
 # Time range (Beijing = UTC+8)
@@ -173,6 +181,7 @@ def build_prompt(summaries, messages_by_session, learnings_md, date_str):
 def call_llm(prompt: str) -> dict:
     import urllib.request
 
+    api_key, base_url = _get_llm_client()
     payload = {
         "model": LLM_MODEL,
         "messages": [{"role": "user", "content": prompt}],
@@ -183,11 +192,11 @@ def call_llm(prompt: str) -> dict:
 
     body = json.dumps(payload).encode()
     req = urllib.request.Request(
-        MINIMAX_BASE_URL + "/v1/messages",
+        base_url + "/v1/messages",
         data=body,
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {MINIMAX_API_KEY}",
+            "Authorization": f"Bearer {api_key}",
             "anthropic-version": "2023-06-01",
         }
     )

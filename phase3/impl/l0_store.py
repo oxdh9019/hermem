@@ -83,9 +83,10 @@ def enforce_l0_quota():
     for f in files:
         if total < target:
             break
-        total -= f.stat().st_size
+        size = f.stat().st_size
+        total -= size
         f.unlink()
-        print(f"  [l0 gc] deleted {f.name} ({f.stat().st_size // 1024}KB)")
+        print(f"  [l0 gc] deleted {f.name} ({size // 1024}KB)")
 
 
 def load_l0_detail(l0_ref: str, context_hint: str = None) -> str:

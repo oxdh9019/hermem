@@ -71,7 +71,7 @@ class TestPhase2cInit(unittest.TestCase):
 
     def test_instance_variables(self):
         p = MockProvider()
-        self.assertIsInstance(p._pending_recall_lock, threading.Lock)
+        self.assertIs(type(p._pending_recall_lock), type(threading.Lock()))
         self.assertEqual(p._pending_recall_keywords, [])
         self.assertEqual(p._pending_recall_turn_counter, 0)
 
