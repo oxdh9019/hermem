@@ -58,7 +58,7 @@ After each session, annotate L0 with prediction errors the assistant made:
 - `overall_quality_score`: session-level prediction quality (0–1)
 
 Annotation runs **asynchronously** (background queue, does not block session processing).
-**Model**: MiniMax-M2.7 with `x-no-think: true` header (migrated from qwen2.5:3b, 2026-05-20).
+**Model**: MiniMax-M2.7 with `x-no-think: true` header (migrated from qwen2.5:3b → qwen3.5:2b, 2026-05-21).
 
 ### V4.2 — Conditioned Dispositions
 
@@ -190,9 +190,16 @@ hermem/
 ## Phase 3 Key Design Decisions
 
 - **No Hard Filter**: L1 search does NO fact-type filtering — only boost post-processing
+- **LLM for extraction**: qwen2.5:3b → qwen3.5:2b (2026-05-21), qwen3.5 routes via native API + think:false
 - **MiniMax for annotation**: qwen2.5:3b → MiniMax-M2.7 (2026-05-20), enables full Phase3 capabilities
 - **Skill-only delivery**: No core Hermes code modification required for the skill layer
 - **Auditability over performance**: git log, journal, annotations — all publicly auditable
+
+## Outstanding Issues
+
+| Issue | Notes | Revisit After |
+|-------|-------|---------------|
+| **B3 is_recurring_cross_session bypass** | BLOCKED — all error annotations map to 2-3 broad disposition buckets; no granularity to distinguish recurring vs isolated. Also: success_count=0 (all annotations flagged as errors, no success path ever reached). | V4.4 per-turn judgment provides finer-grained data |
 
 ## Caveats
 
@@ -203,6 +210,7 @@ hermem/
 | V4.1 Error Annotation | ✅ MiniMax-M2.7 async queue |
 | V4.2 Conditioned Dispositions | ✅ l1_dispositions table, extract/vector_search/three-tier detection |
 | V4.3 Error-Activated Retrieval | ✅ Beta (v4.3.0-beta) — B1/B2/B4/B5/B6/B8/B9/C3 complete |
+| V4.4 Per-Turn Judgment | 🚧 Phase1 in progress — few-shot prompt + sync_turn integration |
 | Intent Classifier (B2) | ✅ 13 intents + 2-layer architecture |
 | Daily Journal + Synthesis Loop | ✅ Cron at 02:00 / 06:00 |
 | C1/C2 gateway hooks | ⚠️ Defined but not called by Hermes gateway yet |
