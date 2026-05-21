@@ -246,15 +246,17 @@ def keyword_search(query: str, top_k: int = 5) -> list[dict]:
 
 ## 实施步骤
 
-- [ ] Step 1: 初始化 `hermem.db`（chunks + embedding_cache + FTS5 表）
-- [ ] Step 2: 实现 `impl/database.py`（SQLite 连接管理 + chunks 表操作）
-- [ ] Step 3: 实现 `impl/embedding.py`（Ollama bge-m3 调用 + 缓存）
-- [ ] Step 4: 实现 `impl/vectorstore.py`（NumPy npy 读写 + 原子写入 + top-k 检索）
-- [ ] Step 5: 实现 `impl/retrieval.py`（语义搜索 + FTS5 回退 + 混合 RRF）
-- [ ] Step 6: 编写历史摘要迁移脚本（扫描 sessions/*.md → 入库）
-- [ ] Step 7: 实现 Hermem CLI 工具（`hermem search`）
-- [ ] Step 8: 健康检查（Ollama + bge-m3 可用性）
-- [ ] Step 9: 端到端测试（摘要 → 入库 → 语义召回）
+- [x] Step 1: 初始化 `hermem.db`（chunks + embedding_cache + FTS5 表）
+- [x] Step 2: 实现 `impl/database.py`（SQLite 连接管理 + chunks 表操作）
+- [x] Step 3: 实现 `impl/embedding.py`（Ollama bge-m3 调用 + 缓存）
+- [x] Step 4: 实现 `impl/vectorstore.py`（NumPy npy 读写 + 原子写入 + top-k 检索）
+- [x] Step 5: 实现 `impl/retrieval.py`（语义搜索 + FTS5 回退 + 混合 RRF）
+- [x] Step 6: 编写历史摘要迁移脚本（扫描 sessions/*.md → 入库）
+- [x] Step 7: 实现 Hermem CLI 工具（`hermem search`）
+- [x] Step 8: 健康检查（Ollama + bge-m3 可用性）
+- [x] Step 9: 端到端测试（摘要 → 入库 → 语义召回）
+
+> ✅ Phase 2 语义召回方案（v3.0，NumPy + SQLite 混合）于 2026-05-01 实施完成。
 
 ---
 
@@ -294,3 +296,64 @@ for r in results: print(r['content'][:80])
 | SHA256 / pickle | Python 标准库 | 缓存序列化 |
 
 **零外部依赖**（对比 v2.0 减少了 MiniMax API，替换了不可用的 vec0）。
+
+---
+
+## 附录：V4.x 架构演进（2026-05-19 起）
+
+> Phase 2 实现了语义召回（NumPy + SQLite），但记忆仍是"存储-检索"模式。V4.x 将记忆重新定义为**生成模型**而非存储文本——Hermem 预测用户需要什么，在预测被违反时触发学习。
+
+### V4.0 — Predictive Memory 核心范式
+
+```
+Context → Predict what should happen → Compare to what actually happens
+                                              ↓
+                                    Error signal → Update disposition
+                                              ↓
+                                    Daily synthesis → Active memory
+```
+
+### V4.1 — Error Annotation
+
+在每次会话后，用 MiniMax-M2.7 标注 L0 中的预测误差：
+
+```python
+prediction_errors[]  # 被违反的可证伪预测
+surprise_level       # 意外程度 (0-1)
+confidence           # 每个错误的置信度 (0-1)
+overall_quality_score # 会话级预测质量 (0-1)
+```
+
+### V4.2 — Conditioned Dispositions
+
+用 `(condition, prediction, confidence, error_history)` 元组替代原子 L1 事实：
+
+```python
+condition_text      # 何时激活
+prediction_text    # 用户期望什么
+error_count        # 预测被违反次数
+success_count       # 预测正确次数
+disposition_decay  # 时间×频次联合衰减（7天半衰期）
+```
+
+### V4.3 — Error-Activated Retrieval
+
+意图分类（13 种）决定路由：
+
+| 意图类型 | 处置 |
+|----------|------|
+| 修正/反馈 | 更新 disposition |
+| 学习/咨询 | 触发 recall 模式 |
+| 执行/确认 | 直接执行 |
+
+三层检索：B1(strong) / B2(medium) / C3(fallback)，C3 兜底将覆盖率从 6.7% 提升至 ~100%。
+
+### V4.4 — Concurrency Fixes
+
+向量存储并发安全 + 自动修复：
+
+- **P0**: `append_vectors()` 双重锁（`threading.Lock` + `fcntl.flock`）
+- **P1**: `hermes_auto_index_all.py` 文件锁（防止并发覆盖）
+- **P2**: `watchdog_vectorstore.py` drift 检测 + 自动 truncate/remap
+
+详见 [README.md](./README.md) 或 GitHub repo。
