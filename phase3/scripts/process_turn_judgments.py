@@ -82,7 +82,7 @@ class FactCache:
 def extract_turn_facts(dialogue: str) -> list[dict]:
     """从单轮对话片段提取原子事实。"""
     prompt = TURN_FACT_EXTRACT_PROMPT.format(DIALOGUE=dialogue)
-    content = llm_generate(prompt, model="qwen3.5:2b", temperature=0.3, max_tokens=512)
+    content = llm_generate(prompt, model="qwen3.5:4b-no-think", temperature=0.3, max_tokens=512)
 
     text = content.strip()
     if text.startswith("```"):
