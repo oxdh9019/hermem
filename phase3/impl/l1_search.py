@@ -55,6 +55,7 @@ def calculate_activation_score(
 def disposition_aware_rerank(
     l1_results: list[dict],
     dispositions: list[dict],
+    query: str = "",
     boost_factor: float = 1.5,
 ) -> list[dict]:
     """
@@ -72,6 +73,7 @@ def disposition_aware_rerank(
     Args:
         l1_results:    vector_search_l1() 返回的原始结果（含 _sim 字段）
         dispositions:  vector_search_dispositions() 返回的结果（含 l0_ref 或 source_session_id）
+        query:         原始查询（用于日志）
         boost_factor:  boost 倍数（默认 1.5）
 
     Returns:
@@ -102,13 +104,16 @@ def disposition_aware_rerank(
         condition_keywords.update(w.lower() for w in re.findall(r'[a-zA-Z]+', cond))
 
     # 应用 boost
+    boost_log: list[dict] = []
     for fact in l1_results:
         boosted = False
+        match_method = None
         # 路径1: l0_ref 匹配
         if fact.get("l0_ref") in disp_l0_refs:
             fact["_sim"] = fact["_sim"] * boost_factor
             fact["_disposition_boost"] = True
             boosted = True
+            match_method = "l0_ref"
         # 路径2: condition 关键词命中 fact content
         elif condition_keywords:
             content = fact.get("content", "") or ""
@@ -118,12 +123,76 @@ def disposition_aware_rerank(
                 fact["_sim"] = fact["_sim"] * boost_factor
                 fact["_disposition_boost"] = True
                 boosted = True
+                match_method = "keyword"
         if not boosted:
             fact["_disposition_boost"] = False
+        # 记录日志（所有有 _disposition_boost=True 的 fact）
+        if fact.get("_disposition_boost"):
+            boost_log.append({
+                "fact_id":     fact["id"],
+                "fact_l0_ref": fact.get("l0_ref"),
+                "match_method": match_method,
+                "old_sim":     round(fact["_sim"] / boost_factor, 4),
+                "new_sim":     round(fact["_sim"], 4),
+            })
 
     # 重新按 _sim 降序排列
     l1_results.sort(key=lambda x: x["_sim"], reverse=True)
+
+    # 写 boost 日志（异步，不阻塞返回）
+    if boost_log:
+        _write_boost_log(query, dispositions, boost_log)
+
     return l1_results
+
+
+# ── Boost 日志写入 ───────────────────────────────────────────
+
+_BOOST_LOG_PATH: str | None = None
+
+
+def _get_boost_log_path() -> str:
+    """延迟解析日志路径，避免模块加载时 ~/.hermes 不可用"""
+    global _BOOST_LOG_PATH
+    if _BOOST_LOG_PATH is None:
+        import os
+        home = os.path.expanduser("~")
+        log_dir = os.path.join(home, ".hermes", "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        _BOOST_LOG_PATH = os.path.join(log_dir, "hermem-boost.jsonl")
+    return _BOOST_LOG_PATH
+
+
+def _write_boost_log(query: str, dispositions: list[dict], boost_entries: list[dict]) -> None:
+    """将 boost 事件异步写入 JSONL 文件，不阻塞主流程"""
+    import json, threading, os
+    from datetime import datetime
+
+    disp_ids = [d.get("id", "")[:40] for d in dispositions]
+    entry = {
+        "ts":          datetime.now().isoformat(),
+        "query":       query,
+        "disposition_ids": disp_ids,
+        "boosted_facts":  boost_entries,
+    }
+    try:
+        path = _get_boost_log_path()
+        line = json.dumps(entry, ensure_ascii=False)
+        # 异步写，避免阻塞 LLM 返回
+        t = threading.Thread(target=_async_append, args=(path, line + "\n"), daemon=True)
+        t.start()
+    except Exception:
+        pass  # 日志失败不影响主流程
+
+
+def _async_append(path: str, line: str) -> None:
+    """后台追加写文件"""
+    import os
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(line)
+    except Exception:
+        pass
 
 
 def vector_search_l1(query_emb, top_k: int = 20) -> list[dict]:
@@ -313,7 +382,7 @@ def retrieve(
     # Step 3: 后处理 boost（不是过滤！）
     # V4.5: disposition-aware rerank — 与 top dispositions 共享 l0_ref 的 fact 获得 boost
     if dispositions:
-        l1_results = disposition_aware_rerank(l1_results, dispositions, boost_factor=1.5)
+        l1_results = disposition_aware_rerank(l1_results, dispositions, query=query, boost_factor=1.5)
 
     if preferred_types:
         scored = []
