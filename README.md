@@ -12,8 +12,9 @@ Hermes lightweight memory enhancement system — L0–L3 hierarchical memory wit
 | **V4.2** | **Conditioned Dispositions** | (condition, prediction, error_history) tuples replacing flat facts |
 | **V4.3** | **Error-Activated Retrieval** | Beta — error signal closes the learning loop |
 | **V4.4** | **Concurrency Fixes** | Vectorstore double-lock, auto_index file lock, watchdog drift monitor |
+| **V4.5** | **Disposition-Aware Rerank** | Boost L1 facts via disposition context — error_count now drives retrieval ranking |
 
-> **V4.3.1 is active** (2026-05-22). Plan B consumer fix — bypass broken L0-file queue, annotation now runs via direct `llm_generate()` + `update_dispositions_from_errors()` in ThreadPoolExecutor. Model unified to qwen3.5:4b-no-think for all plugin calls.
+> **V4.5 is active** (2026-05-22). `disposition_aware_rerank()` — disposition context boosts L1 fact retrieval via l0_ref match + condition keyword fallback. Boost log → `~/.hermes/logs/hermem-boost.jsonl`. error_count → behavior closed loop.
 
 ---
 
@@ -213,6 +214,26 @@ V4.3 completes the error-driven learning loop. **End-to-end annotation pipeline 
 
 **Pending:** B3 (dynamic threshold), B7 (multi-error weights), C1/C2 (gateway hooks)
 
+### V4.5 — Disposition-Aware Rerank (2026-05-22)
+
+V4.5 closes the error_count → behavior loop. `disposition_aware_rerank()` boosts L1 facts that share context with top dispositions, so dispositions don't just accumulate error_count — they actively rerank what Hermem retrieves.
+
+**Boost paths:**
+1. `l0_ref` exact match — disposition and fact from the same session (precision path)
+2. Condition keyword → fact content overlap ≥ 2 hits (fallback for UUID-format dispositions from OpenClaw import)
+
+**Code:**
+```python
+# Phase 3 impl/l1_search.py
+disposition_aware_rerank(l1_results, dispositions, query=query, boost_factor=1.5)
+```
+
+**Boost log:** `~/.hermes/logs/hermem-boost.jsonl` (async, non-blocking). Each entry records:
+- `query`, `disposition_ids`, `boosted_facts[]` with `match_method`, `old_sim`, `new_sim`
+- Analyzable with: `jq 'select(.query | contains("..."))' ~/.hermes/logs/hermem-boost.jsonl`
+
+**Schema note:** `l1_dispositions.l0_ref` (UUID) ≠ `l1_facts.l0_ref` (l0_YYYYMMDD_HHMMSS). Only dispositions created after 2026-05-18 have matching L0 refs. Path 2 (keyword fallback) covers the rest.
+
 ### V4.4 — Concurrency Fixes (2026-05-21)
 
 | Phase | Feature | Status |
@@ -263,9 +284,10 @@ python3 phase3/cron_daily.py
 
 ## Outstanding Issues
 
-| Issue | Notes | Revisit After |
+||| Issue | Notes | Revisit After |
 |-------|-------|---------------|
-| **B3 is_recurring_cross_session bypass** | BLOCKED — all error annotations map to 2-3 broad disposition buckets; success_count=0 (all annotations flagged as errors, no success path ever reached). | V4.4 per-turn judgment provides finer-grained data |
+| **B3 is_recurring_cross_session** | Dynamic threshold blocked — success_count=0 from annotation-only data. B3 bypass via satisfaction check (V4.4 Plan B) — no dynamic threshold needed yet. | More satisfaction check data |
+| **V4.5 keyword threshold tuning** | `MIN_HITS=2` is conservative. After 1-2 weeks of boost log data, tighten to `max(2, ceil(n_keywords*0.4))` or add `trigger_keywords` field. | Boost log analysis |
 
 ## Caveats
 
@@ -276,7 +298,8 @@ python3 phase3/cron_daily.py
 | V4.1 Error Annotation | ✅ MiniMax-M2.7 async queue |
 | V4.2 Conditioned Dispositions | ✅ l1_dispositions table, extract/vector_search/three-tier detection |
 | V4.3 Error-Activated Retrieval | ✅ Beta (v4.3.0-beta) — B1/B2/B4/B5/B6/B8/B9/C3 complete |
-| V4.4 Concurrency Fixes | ✅ P0/P1/P2 complete |
+| **V4.4 Concurrency Fixes** | ✅ P0/P1/P2 complete |
+| **V4.5 Disposition-Aware Rerank** | ✅ Boost log active — `~/.hermes/logs/hermem-boost.jsonl` |
 | Intent Classifier (B2) | ✅ 13 intents + 2-layer architecture |
 | Daily Journal + Synthesis Loop | ✅ Cron at 02:00 / 06:00 |
 | C1/C2 gateway hooks | ⚠️ Defined but not called by Hermes gateway yet |
