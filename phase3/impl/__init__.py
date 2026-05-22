@@ -27,6 +27,7 @@ def process_session(
     start: str,
     end: str,
     session_summary: str,
+    active_disposition_ids: list[str] | None = None,
 ) -> dict:
     """
     端到端处理一个会话的全部 Phase 3 流程。
@@ -72,11 +73,13 @@ def process_session(
 
     # 7. Error annotation（异步，不阻塞主流程）
     #    使用 enqueue 而非同步调用，避免 LLM 延迟阻塞用户响应
+    #    active_disposition_ids: V4.5 精确 success 匹配所需的上下文
     from .async_annotation import enqueue_annotation
     qsize = enqueue_annotation(
         session_id=session_id,
         session_summary=session_summary,
         l1_facts=facts,
+        active_disposition_ids=active_disposition_ids,
     )
     stats["annotation_queued"] = True
     stats["annotation_queue_depth"] = qsize

@@ -45,12 +45,19 @@ def _worker():
         except queue.Empty:
             continue
 
-        # 兼容两种格式：2-tuple（轻量级）或 3-tuple（标准）
+        # 支持三种格式：
+        # 2-tuple（轻量级）：(session_id, session_summary)
+        # 3-tuple（标准）：(session_id, session_summary, l1_facts)
+        # 4-tuple（V4.5）：(session_id, session_summary, l1_facts, active_disposition_ids)
         if len(item) == 2:
             session_id, session_summary = item
             l1_facts = []
-        else:
+            active_disposition_ids = []
+        elif len(item) == 3:
             session_id, session_summary, l1_facts = item
+            active_disposition_ids = []
+        else:
+            session_id, session_summary, l1_facts, active_disposition_ids = item
 
         try:
             # 幂等检查：优先查 L0 文件，再查 lightweight cache
@@ -77,11 +84,21 @@ def _worker():
                 if updated > 0:
                     print(f"[AsyncAnnotation] B1 更新了 {updated} 条 disposition error_count")
             else:
-                # V4.3 B1: 无 prediction_errors → 累加 success_count
-                from .disposition_updater import increment_success_count
-                incremented = increment_success_count(session_id)
-                if incremented > 0:
-                    print(f"[AsyncAnnotation] B1 累加 {incremented} 条 disposition success_count")
+                # V4.5: 无 prediction_errors → 累加 success_count
+                # 优先用精确 ID 匹配，fallback 到 session 匹配（V4.3 旧行为）
+                from .disposition_updater import increment_success_count, increment_success_by_ids
+                # 从 queue item 提取 active_disposition_ids（第 4 个元素，新格式）
+                active_ids = []
+                if len(item) >= 4:
+                    active_ids = item[3] or []
+                if active_ids:
+                    incremented = increment_success_by_ids(active_ids, session_id)
+                    if incremented > 0:
+                        print(f"[AsyncAnnotation] V4.5 精确更新 {incremented} 条 disposition success_count（IDs）")
+                else:
+                    incremented = increment_success_count(session_id)
+                    if incremented > 0:
+                        print(f"[AsyncAnnotation] V4.5 回退累加 {incremented} 条 disposition success_count（session）")
         except Exception as e:
             print(f"[AsyncAnnotation] 异常: {session_id} - {e}")
         finally:
@@ -130,8 +147,12 @@ def drain_queue(n_workers: int = 4, timeout: int = 300):
             if len(item) == 2:
                 session_id, session_summary = item
                 l1_facts = []
-            else:
+                active_disposition_ids = []
+            elif len(item) == 3:
                 session_id, session_summary, l1_facts = item
+                active_disposition_ids = []
+            else:
+                session_id, session_summary, l1_facts, active_disposition_ids = item
             try:
                 from .config import L0_DIR as _L0_DIR
                 l0_path = Path(_L0_DIR) / f"{session_id}.json"
@@ -151,8 +172,14 @@ def drain_queue(n_workers: int = 4, timeout: int = 300):
                     from .disposition_updater import update_dispositions_from_errors
                     update_dispositions_from_errors(session_id, annotation)
                 elif annotation:
-                    from .disposition_updater import increment_success_count
-                    increment_success_count(session_id)
+                    # V4.5: 优先用精确 ID 匹配，fallback 到 session 匹配
+                    from .disposition_updater import increment_success_count, increment_success_by_ids
+                    if active_disposition_ids:
+                        updated = increment_success_by_ids(active_disposition_ids, session_id)
+                        if updated > 0:
+                            print(f"[Drain w{wid}] V4.5 精确更新 {updated} 条 disposition success_count")
+                    else:
+                        increment_success_count(session_id)
             except Exception as e:
                 print(f"[Drain w{wid}] {session_id}: {e}")
             finally:
@@ -187,14 +214,18 @@ def enqueue_annotation(
     session_id: str,
     session_summary: str,
     l1_facts: list[dict],
+    active_disposition_ids: list[str] | None = None,
 ) -> int:
     """
     标准入队接口（用于 process_session 批量流程）。
-    queue item 为 3-tuple: (session_id, session_summary, l1_facts)
+    queue item 为 4-tuple: (session_id, session_summary, l1_facts, active_disposition_ids)
+
+    active_disposition_ids: V4.5 新增。Turn N 检索时激活的 disposition ID 列表，
+    用于 annotation 完成后精确累加 success_count，避免 session 级别误增。
     """
     if not session_id:
         return _annotation_queue.qsize()
-    _annotation_queue.put((session_id, session_summary, l1_facts))
+    _annotation_queue.put((session_id, session_summary, l1_facts, active_disposition_ids or []))
     return _annotation_queue.qsize()
 
 
