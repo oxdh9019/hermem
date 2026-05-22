@@ -5,6 +5,7 @@ Step 3b: vector_search_l1() — 纯语义，无类型过滤
 Step 3c: retrieve() — 后处理 boost（替代硬过滤）
 """
 import json as json_lib
+import re
 from datetime import datetime as _dt
 from .config import DB_PATH
 from .utils import (
@@ -49,6 +50,80 @@ def calculate_activation_score(
     error_factor = 0.5 if capped_error == 0 else capped_error
 
     return sim * f_time * error_factor, f_time, error_factor
+
+
+def disposition_aware_rerank(
+    l1_results: list[dict],
+    dispositions: list[dict],
+    boost_factor: float = 1.5,
+) -> list[dict]:
+    """
+    Phase 3 V4.5: Disposition-Aware Rerank。
+
+    对 L1 检索结果做后处理 boost：与 top dispositions 共享 l0_ref 的 fact
+    获得 boost_factor 倍分数。
+
+    Boost 路径（优先级递减）：
+      1. l0_ref 精确匹配（disposition.l0_ref == fact.l0_ref）
+         注意：需要两边 ref 格式一致才生效（当前仅最近创建的 model_error dispositions）
+      2. condition_text 关键词重叠（disposition 条件词命中 fact 内容）
+         作为 fallback，覆盖 OpenClaw 导入的 user_behavior dispositions（UUID 格式无对应 L0）
+
+    Args:
+        l1_results:    vector_search_l1() 返回的原始结果（含 _sim 字段）
+        dispositions:  vector_search_dispositions() 返回的结果（含 l0_ref 或 source_session_id）
+        boost_factor:  boost 倍数（默认 1.5）
+
+    Returns:
+        重新排序后的 l1_results（原地修改 _sim + _disposition_boost 标记）
+    """
+    if not l1_results or not dispositions:
+        return l1_results
+
+    # ── 路径1: l0_ref 精确匹配 ─────────────────────────────
+    disp_l0_refs: set[str] = set()
+    for d in dispositions:
+        ref = d.get("l0_ref")
+        if ref:
+            disp_l0_refs.add(ref)
+
+    # ── 路径2: condition 关键词 fallback ───────────────────
+    # 收集所有 disposition condition 的关键词（用于 content 命中）
+    condition_keywords: set[str] = set()
+    for d in dispositions:
+        cond = d.get("condition", "") or ""
+        # 简单分词：中文按字符，英文按空格
+        words = re.findall(r'[\u4e00-\u9fff]+', cond)
+        for chunk in words:
+            for i in range(len(chunk)):
+                condition_keywords.add(chunk[i])
+            for i in range(len(chunk) - 1):
+                condition_keywords.add(chunk[i:i+2])
+        condition_keywords.update(w.lower() for w in re.findall(r'[a-zA-Z]+', cond))
+
+    # 应用 boost
+    for fact in l1_results:
+        boosted = False
+        # 路径1: l0_ref 匹配
+        if fact.get("l0_ref") in disp_l0_refs:
+            fact["_sim"] = fact["_sim"] * boost_factor
+            fact["_disposition_boost"] = True
+            boosted = True
+        # 路径2: condition 关键词命中 fact content
+        elif condition_keywords:
+            content = fact.get("content", "") or ""
+            content_lower = content.lower()
+            hits = sum(1 for kw in condition_keywords if len(kw) > 1 and kw in content_lower)
+            if hits >= 2:  # 至少命中 2 个关键词
+                fact["_sim"] = fact["_sim"] * boost_factor
+                fact["_disposition_boost"] = True
+                boosted = True
+        if not boosted:
+            fact["_disposition_boost"] = False
+
+    # 重新按 _sim 降序排列
+    l1_results.sort(key=lambda x: x["_sim"], reverse=True)
+    return l1_results
 
 
 def vector_search_l1(query_emb, top_k: int = 20) -> list[dict]:
@@ -117,7 +192,7 @@ def vector_search_dispositions(
 
     if intent:
         rows = conn.execute(
-            "SELECT id, condition_text, prediction_text, confidence, source_agent, "
+            "SELECT id, l0_ref, source_session_id, condition_text, prediction_text, confidence, source_agent, "
             "       condition_embedding, intent, scope, "
             "       error_count, last_error_at, weight "
             "FROM l1_dispositions "
@@ -126,7 +201,7 @@ def vector_search_dispositions(
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, condition_text, prediction_text, confidence, source_agent, "
+            "SELECT id, l0_ref, source_session_id, condition_text, prediction_text, confidence, source_agent, "
             "       condition_embedding, intent, scope, "
             "       error_count, last_error_at, weight "
             "FROM l1_dispositions WHERE is_active = 1 AND scope = 'model_error'"
@@ -170,6 +245,7 @@ def vector_search_dispositions(
 
         results.append({
             "id":             row["id"],
+            "l0_ref":         row["l0_ref"] if "l0_ref" in row.keys() and row["l0_ref"] else (row["source_session_id"] if "source_session_id" in row.keys() else None),
             "condition":      row["condition_text"],
             "prediction":     row["prediction_text"],
             "confidence":     row["confidence"],
@@ -235,6 +311,10 @@ def retrieve(
     l2_scenes = _associate_scenes(l1_results)
 
     # Step 3: 后处理 boost（不是过滤！）
+    # V4.5: disposition-aware rerank — 与 top dispositions 共享 l0_ref 的 fact 获得 boost
+    if dispositions:
+        l1_results = disposition_aware_rerank(l1_results, dispositions, boost_factor=1.5)
+
     if preferred_types:
         scored = []
         for r in l1_results:
