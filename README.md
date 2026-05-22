@@ -13,7 +13,7 @@ Hermes lightweight memory enhancement system — L0–L3 hierarchical memory wit
 | **V4.3** | **Error-Activated Retrieval** | Beta — error signal closes the learning loop |
 | **V4.4** | **Concurrency Fixes** | Vectorstore double-lock, auto_index file lock, watchdog drift monitor |
 
-> **V4.4 is active** (2026-05-21). Vectorstore now has process-safe double locking; watchdog runs every 360m with auto-fix.
+> **V4.3.1 is active** (2026-05-22). Plan B consumer fix — bypass broken L0-file queue, annotation now runs via direct `llm_generate()` + `update_dispositions_from_errors()` in ThreadPoolExecutor. Model unified to qwen3.5:4b-no-think for all plugin calls.
 
 ---
 
@@ -160,9 +160,18 @@ Replace propositional L1 facts with `(condition, prediction, confidence, error_h
 - `error_count` / `success_count`: tracks prediction accuracy over time
 - `disposition_decay`: time × frequency joint decay (7-day half-life)
 
-### V4.3 — Error-Activated Retrieval (beta)
+### V4.3 — Error-Activated Retrieval
 
-V4.3 completes the error-driven learning loop.
+V4.3 completes the error-driven learning loop. **End-to-end annotation pipeline verified (2026-05-22).**
+
+**Key fix (V4.3.1):** Plan B consumer bypassed broken L0-file queue — annotation now runs via direct `llm_generate()` + `update_dispositions_from_errors()` in ThreadPoolExecutor threads. Feedback annotation JSON cascades to disposition `error_count` updates.
+
+**Model changes (2026-05-22):**
+- Per-turn judgment: switched from `llm_generate` (OpenAI endpoint, empty response for qwen3.5:4b-no-think) to `llm_generate_ollama` (native `/api/chat`)
+- All Hermem plugin calls unified on `qwen3.5:4b-no-think`
+- Annotation: `MiniMax-M2.7` (qwen3.5:4b-no-think times out on long ERROR_ANNOTATION_PROMPT inputs)
+
+**8 Trigger Conditions:**
 
 **Intent Classification (B2):** 13 intents + two-layer architecture.
 
@@ -232,6 +241,23 @@ python3 phase3/impl/db_init.py
 # Run daily pipeline (journal 02:00 + synthesis 06:00)
 python3 phase3/cron_daily.py
 ```
+
+---
+
+## Changelog
+
+### 2026-05-22 — V4.3.1 Patch
+
+**hermem repo** (`d63f663`, pushed to `origin/main`):
+- **B1/B2/B4 fixes**: `l1_search.py` trigger keyword case-insensitivity, `_judge_similar()` fallback to `condition_embedding` similarity, `l0_store.py` GC `stat`-before-`unlink`
+- **Per-turn judgment endpoint**: `llm_generate` (OpenAI `/v1/chat/completions`) → `llm_generate_ollama` (native `/api/chat`) for qwen3.5:4b-no-think compatibility
+- **Model unification**: all plugin calls on `qwen3.5:4b-no-think`; qwen3.5:2b and qwen3.5:2b-no-think unloaded from Ollama (saves ~2.6GB)
+- **Annotation model**: `MiniMax-M2.7` (not qwen3.5:4b — times out on long ERROR_ANNOTATION_PROMPT prompts)
+
+**hermes-agent repo** (`d16b167bf`, local commit only):
+- **Plan B consumer fix**: bypassed broken `enqueue_annotation_lightweight` → queue → worker → L0 file path; consumer now calls `llm_generate()` + `update_dispositions_from_errors()` directly in ThreadPoolExecutor threads
+- **End-to-end verified**: injected feedback → annotation → disposition cascade confirmed (error_count 12→19 on `disp_hm_20260519215550_17`)
+- hermes-agent remote is `NousResearch/hermes-agent` (no write access) — commit stays local
 
 ---
 
