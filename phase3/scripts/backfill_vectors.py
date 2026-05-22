@@ -35,18 +35,34 @@ EMBED_DIM    = 1024                    # bge-m3 output dim (matches existing npy
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def acquire_lock(path: Path, timeout: float = 5.0) -> threading.Lock:
-    """Simple file-based lock via exclusive open."""
-    lock = threading.Lock()
-    start = time.time()
-    while (time.time() - start) < timeout:
-        try:
-            open(path, "x").close()
-            path.unlink()
-            return lock
-        except FileExistsError:
-            time.sleep(0.05)
-    raise RuntimeError(f"Could not acquire lock {path}")
+import fcntl
+
+
+class FileLock:
+    """进程间文件锁（fcntl.flock），支持 with 语句。"""
+    def __init__(self, path: Path, timeout: float = 5.0):
+        self.path = path
+        self.timeout = timeout
+        self._fd = None
+
+    def __enter__(self):
+        self._fd = open(self.path, "w")
+        deadline = time.time() + self.timeout
+        while True:
+            try:
+                fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except (IOError, OSError):
+                if time.time() > deadline:
+                    self._fd.close()
+                    raise RuntimeError(f"Could not acquire lock {self.path}")
+                time.sleep(0.05)
+
+    def __exit__(self, *args):
+        if self._fd:
+            fcntl.flock(self._fd, fcntl.LOCK_UN)
+            self._fd.close()
+            self._fd = None
 
 
 def load_meta() -> dict:
@@ -83,13 +99,16 @@ def update_db_batch(ids: list[int], new_indices: list[int]):
     """Batch update vec_index for a list of chunks (by id)."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    cases = " ".join(f"WHEN id = {cid} THEN {idx}" for cid, idx in zip(ids, new_indices))
-    sql = f"""
+    # 临时表替代 f-string CASE WHEN（防止 SQL 注入）
+    c.execute("CREATE TEMP TABLE IF NOT EXISTS _idx_map (chunk_id INTEGER, new_idx INTEGER)")
+    c.execute("DELETE FROM _idx_map")
+    c.executemany("INSERT INTO _idx_map VALUES (?, ?)", list(zip(ids, new_indices)))
+    c.execute("""
         UPDATE chunks
-        SET vec_index = CASE {cases} END
-        WHERE id IN ({','.join('?'*len(ids))})
-    """
-    c.execute(sql, ids)
+        SET vec_index = (SELECT new_idx FROM _idx_map WHERE chunk_id = chunks.id)
+        WHERE id IN (SELECT chunk_id FROM _idx_map)
+    """)
+    c.execute("DELETE FROM _idx_map")
     conn.commit()
     conn.close()
 
@@ -266,7 +285,7 @@ def main():
     null_count = c.fetchone()[0]
     print(f"  NULL/-1 vec_index remaining: {null_count}")
 
-    c.execute(f"SELECT COUNT(*) FROM chunks WHERE vec_index >= {next_idx + total}")
+    c.execute("SELECT COUNT(*) FROM chunks WHERE vec_index >= ?", (next_idx + total,))
     oob_still = c.fetchone()[0]
     print(f"  vec_index >= {next_idx + total} (stale OOB): {oob_still}")
 

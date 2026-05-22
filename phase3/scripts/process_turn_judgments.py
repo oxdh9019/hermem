@@ -170,7 +170,7 @@ def process_judgments(path: Path, dry_run: bool = False, limit: int | None = Non
         print(f"[Phase2a] 文件不存在: {path}")
         return {"skipped": 0, "extracted": 0, "stored": 0, "duplicates": 0}
 
-    cache = FactCache(max_size=5)
+    cache = FactCache(max_size=500)
     stats = {"total": 0, "new_fact_true": 0, "extracted": 0, "stored": 0, "duplicates": 0, "errors": 0}
 
     with open(path, "r", encoding="utf-8") as f:

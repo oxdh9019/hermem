@@ -57,10 +57,18 @@ END_JD   = to_jd(end_ts)
 
 # ── Data fetching ─────────────────────────────────────────────────────────────
 
-def fetch_session_summaries():
+def fetch_session_summaries(start_jd=None, end_jd=None):
+    """获取指定时间范围内的会话摘要。接受儒略日参数或 datetime 参数。"""
     conn = sqlite3.connect(MEMORY_DB)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
+
+    # 支持传入 datetime 或儒略日
+    if isinstance(start_jd, datetime):
+        start_jd = to_jd(start_jd)
+    if isinstance(end_jd, datetime):
+        end_jd = to_jd(end_jd)
+
     rows = cur.execute("""
         SELECT session_id, content
         FROM chunks
@@ -68,7 +76,7 @@ def fetch_session_summaries():
           AND created_at >= ?
           AND created_at < ?
         ORDER BY created_at ASC
-    """, (START_JD, END_JD)).fetchall()
+    """, (start_jd or START_JD, end_jd or END_JD)).fetchall()
     conn.close()
     return [(r["session_id"], r["content"]) for r in rows]
 
@@ -328,7 +336,7 @@ def main():
     print(f"[journal] Generating journal for {date_str}")
     print(f"[journal] Time range: {start_ts} -> {end_ts}")
 
-    summaries = fetch_session_summaries()
+    summaries = fetch_session_summaries(start_ts, end_ts)
     print(f"[journal] {len(summaries)} session summaries found")
 
     session_ids = [sid for sid, _ in summaries]

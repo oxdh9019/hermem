@@ -83,6 +83,7 @@ def get_high_error_dispositions(since: datetime) -> List[Dict]:
         WHERE last_error_at >= ?
           AND is_active = 1
           AND scope = 'model_error'
+          AND error_count >= 2
         ORDER BY error_count DESC
     """, (since_iso,))
 

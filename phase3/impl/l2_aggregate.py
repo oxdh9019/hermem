@@ -67,11 +67,32 @@ def try_aggregate_l2(new_l1_facts: list[dict]):
         existing_refs = json.loads(best_match[5])
         existing_refs.extend(new_l1_ids)
         occ = best_match[6] + 1
-        conn.execute("""
-            UPDATE l2_scenes
-            SET l1_refs = ?, occurrence_count = ?, last_seen = ?
-            WHERE id = ?
-        """, (json.dumps(existing_refs), occ, now, best_match[0]))
+
+        # 重新计算场景嵌入：取所有 L1 事实嵌入的加权平均
+        all_fact_vecs = []
+        for ref_id in existing_refs:
+            row = conn.execute(
+                "SELECT chunk_vector FROM l1_facts WHERE id = ? AND status = 'active'",
+                (ref_id,),
+            ).fetchone()
+            if row and row[0]:
+                all_fact_vecs.append(deserialize_vec(row[0]))
+
+        if all_fact_vecs:
+            import numpy as np
+            new_scene_emb = np.mean(all_fact_vecs, axis=0)
+            conn.execute("""
+                UPDATE l2_scenes
+                SET l1_refs = ?, occurrence_count = ?, last_seen = ?, scene_embedding = ?
+                WHERE id = ?
+            """, (json.dumps(existing_refs), occ, now,
+                  serialize_vec(new_scene_emb.tolist()), best_match[0]))
+        else:
+            conn.execute("""
+                UPDATE l2_scenes
+                SET l1_refs = ?, occurrence_count = ?, last_seen = ?
+                WHERE id = ?
+            """, (json.dumps(existing_refs), occ, now, best_match[0]))
         print(f"  [L2] joined scene {best_match[0]} (sim={best_sim:.3f})")
     else:
         # 新建 scene

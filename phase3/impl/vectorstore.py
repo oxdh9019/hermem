@@ -162,8 +162,7 @@ def append_vectors(new_embeddings: list[list[float]]) -> list[int]:
             # 走 tmp 中转再 rename 比直接写更安全
             tmp_file = HERMEM_DIR / ".vector_write_tmp.npy"
             np.save(str(tmp_file), combined)
-            shutil.copy2(str(tmp_file), str(VEC_PATH))
-            tmp_file.unlink(missing_ok=True)
+            os.replace(str(tmp_file), str(VEC_PATH))
 
             # 更新 meta（单次写入，本身原子）
             meta["next_index"] = end_index

@@ -5,7 +5,9 @@ Step 3b: vector_search_l1() — 纯语义，无类型过滤
 Step 3c: retrieve() — 后处理 boost（替代硬过滤）
 """
 import json as json_lib
+import queue
 import re
+import threading
 from datetime import datetime as _dt
 from .config import DB_PATH
 from .utils import (
@@ -146,9 +148,11 @@ def disposition_aware_rerank(
     return l1_results
 
 
-# ── Boost 日志写入 ───────────────────────────────────────────
+# ── Boost 日志写入（单线程队列模式）────────────────────────────────
 
 _BOOST_LOG_PATH: str | None = None
+_boost_queue: queue.Queue = queue.Queue(maxsize=1000)
+_boost_writer_thread: threading.Thread | None = None
 
 
 def _get_boost_log_path() -> str:
@@ -163,36 +167,50 @@ def _get_boost_log_path() -> str:
     return _BOOST_LOG_PATH
 
 
+def _ensure_boost_writer() -> None:
+    """启动单个后台写线程（幂等）"""
+    global _boost_writer_thread
+    if _boost_writer_thread is None or not _boost_writer_thread.is_alive():
+        _boost_writer_thread = threading.Thread(target=_boost_writer_loop, daemon=True, name="boost-writer")
+        _boost_writer_thread.start()
+
+
+def _boost_writer_loop() -> None:
+    """单线程消费 boost 日志队列"""
+    while True:
+        try:
+            path, line = _boost_queue.get(timeout=5.0)
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(line)
+            _boost_queue.task_done()
+        except queue.Empty:
+            continue
+        except Exception:
+            pass
+
+
 def _write_boost_log(query: str, dispositions: list[dict], boost_entries: list[dict]) -> None:
-    """将 boost 事件异步写入 JSONL 文件，不阻塞主流程"""
-    import json, threading, os
+    """将 boost 事件异步写入 JSONL 文件（队列模式，不阻塞返回）"""
+    import json
     from datetime import datetime
 
     disp_ids = [d.get("id", "")[:40] for d in dispositions]
     entry = {
-        "ts":          datetime.now().isoformat(),
-        "query":       query,
+        "ts":              datetime.now().isoformat(),
+        "query":           query,
         "disposition_ids": disp_ids,
-        "boosted_facts":  boost_entries,
+        "boosted_facts":   boost_entries,
     }
     try:
         path = _get_boost_log_path()
-        line = json.dumps(entry, ensure_ascii=False)
-        # 异步写，避免阻塞 LLM 返回
-        t = threading.Thread(target=_async_append, args=(path, line + "\n"), daemon=True)
-        t.start()
+        line = json.dumps(entry, ensure_ascii=False) + "\n"
+        _ensure_boost_writer()
+        try:
+            _boost_queue.put_nowait((path, line))
+        except queue.Full:
+            pass  # 队列满则丢弃，不阻塞检索
     except Exception:
         pass  # 日志失败不影响主流程
-
-
-def _async_append(path: str, line: str) -> None:
-    """后台追加写文件"""
-    import os
-    try:
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(line)
-    except Exception:
-        pass
 
 
 def vector_search_l1(query_emb, top_k: int = 20) -> list[dict]:
