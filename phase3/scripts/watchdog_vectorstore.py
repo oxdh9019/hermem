@@ -39,7 +39,7 @@ def main():
     ts = datetime.datetime.now().isoformat()
     log_line = f"{ts}  {result['message']}"
 
-    # 追加写日志
+    # 追加写日志（先记录初始状态）
     if args.log:
         log_path = Path(args.log).expanduser()
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,30 +53,54 @@ def main():
     else:
         print(f"[ALERT] {result['message']}")
         if args.fix:
-            return auto_fix(result)
+            fix_ret = auto_fix(result)
+            # 修复后重新写入日志（覆盖为修复后状态）
+            if args.log:
+                ts2 = datetime.datetime.now().isoformat()
+                verify = check_drift()
+                post_msg = f"{ts2}  FIXED: {verify['message']}"
+                # 追加修复后记录
+                with open(log_path, "a") as f:
+                    f.write(post_msg + "\n")
+            return fix_ret
         else:
-            print("提示：加 --fix 可自动修复 drift（truncate npy）")
+            print("提示：加 --fix 可自动修复 drift（pad 0 / truncate 多余行）")
             print("      加 --log /path/to/log.txt 可写入日志文件")
             return 2
 
 
 def auto_fix(result: dict):
-    """自动修复：truncate npy 到 meta.next_index 行。"""
+    """自动修复 drift：
+    - drift > 0：npy 少于 meta，pad 0 行补齐
+    - drift < 0：npy 多于 meta，truncate 多的行
+    """
     import numpy as np
     from impl.vectorstore import META_PATH, VEC_PATH, _write_meta, _invalidate_cache
 
-    if result["drift"] <= 0:
-        print("drift <= 0，无需修复")
+    drift = result["drift"]
+    meta_next = result["meta_next"]
+    npy_rows = result["npy_rows"]
+    target_rows = meta_next  # npy 应有的行数
+
+    if drift == 0:
+        print("drift = 0，无需修复")
         return 0
 
-    target_rows = result["meta_next"] - result["drift"]   # = npy_rows
-    print(f"自动修复：将 npy truncate 到 {target_rows} 行（移除 {result['drift']} 行孤儿）")
-
     try:
-        # 加载当前 npy
         vecs = np.load(str(VEC_PATH))
-        truncated = vecs[:target_rows]
-        np.save(str(VEC_PATH), truncated)
+        dim = vecs.shape[1]
+
+        if drift > 0:
+            # npy 落后于 meta → pad 0 行
+            print(f"自动修复：npy 落后 meta {drift} 行，pad {drift} 行零向量至 {target_rows} 行")
+            padding = np.zeros((drift, dim), dtype=vecs.dtype)
+            fixed = np.vstack([vecs, padding])
+        else:
+            # npy 领先于 meta → truncate
+            print(f"自动修复：npy 领先 meta {-drift} 行，truncate 至 {target_rows} 行")
+            fixed = vecs[:target_rows]
+
+        np.save(str(VEC_PATH), fixed)
 
         # 使缓存失效
         _invalidate_cache()

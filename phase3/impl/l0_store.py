@@ -147,7 +147,7 @@ def annotate_l0_after_l1(
     session_id: str,
     session_summary: str,
     l1_facts: list[dict],
-    annotation_model: str = "qwen2.5:3b",
+    annotation_model: str = "MiniMax-M2.7",
 ) -> dict | None:
     """
     对已存在的 L0 文件补充 error_annotation。
@@ -270,7 +270,7 @@ def annotate_l0_after_l1_v2(
     session_id: str,
     session_summary: str,
     l1_facts: list[dict],
-    annotation_model: str = "qwen2.5:3b",
+    annotation_model: str = "MiniMax-M2.7",
     use_preprocessing: bool = True,
     force: bool = False,
 ) -> dict | None:

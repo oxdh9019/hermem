@@ -17,6 +17,7 @@ from impl import (
     try_aggregate_l2, batch_stage_from_l1,
     save_l0_raw, load_l0_detail,
 )
+from impl.async_annotation import start_worker, stop_worker, enqueue_annotation
 from datetime import datetime
 import sqlite3, json
 
@@ -49,8 +50,8 @@ def main():
     existing_l0 = set()
     if L0_DIR.exists():
         for f in L0_DIR.glob("*.json"):
-            # l0_<session_id>.json
-            existing_l0.add(f.stem[3:])  # 去掉 "l0_" 前缀
+            # 文件名即 session_id（无 "l0_" 前缀，l0_ref="l0_{session_id}" 只是引用格式）
+            existing_l0.add(f.stem)
 
     conn = sqlite3.connect(STATE_DB)
     # 只处理非 cron、会话时长 > 60s 的会话，按时间倒序
@@ -70,6 +71,9 @@ def main():
     processed = 0
     skipped = 0
     failed = 0
+
+    # 启动 annotation worker（后台线程）
+    start_worker()
 
     for sid, started, ended, title in sessions:
         if sid in existing_l0:
@@ -111,6 +115,8 @@ def main():
                 try_aggregate_l2(written)
                 # L3 staging
                 batch_stage_from_l1(written, source=sid)
+                # Annotation 入队（异步，不阻塞）
+                enqueue_annotation(sid, summary, facts)
 
                 print(f"  [✓] {sid[:20]} → {len(facts)} facts")
                 processed += 1
@@ -125,6 +131,11 @@ def main():
     print(f"  L1 总量: {sqlite3.connect(OUT_DB).execute('SELECT COUNT(*) FROM l1_facts').fetchone()[0]}")
     print(f"  L2 总量: {sqlite3.connect(OUT_DB).execute('SELECT COUNT(*) FROM l2_scenes').fetchone()[0]}")
     print(f"  L3 staging: {sqlite3.connect(OUT_DB).execute('SELECT COUNT(*) FROM l3_staging').fetchone()[0]}")
+
+    # 等待 annotation 队列处理完毕（最多 120 秒）
+    print(f"\n[Annotation] 等待队列清空...")
+    stop_worker(wait=True)
+    print(f"[Annotation] 队列已清空，cron 结束")
 
 
 if __name__ == "__main__":

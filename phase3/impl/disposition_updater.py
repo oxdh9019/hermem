@@ -258,6 +258,42 @@ def increment_success_count(session_id: str) -> int:
     return updated
 
 
+def increment_success_by_ids(disposition_ids: list[str], session_id: str) -> int:
+    """
+    V4.4 验证段: 按 disposition ID 列表累加 success_count。
+
+    在 Turn N+1 判断 Turn N 激活的 disposition 预测被满足后调用。
+    避免 session_id 匹配过于宽泛的问题（一个 session 可能关联多条 disposition）。
+
+    Args:
+        disposition_ids: 要更新的 disposition id 列表
+        session_id: 来源 session（用于日志和 debugging）
+
+    Returns:
+        实际更新的 disposition 数量
+    """
+    if not disposition_ids:
+        return 0
+
+    db_path = Path(DB_PATH).expanduser()
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    now_iso = datetime.now().isoformat()
+    placeholders = ",".join(["?"] * len(disposition_ids))
+    cursor.execute(
+        f"UPDATE l1_dispositions "
+        f"SET success_count = success_count + 1, "
+        f"last_used_at = ? "
+        f"WHERE id IN ({placeholders}) AND is_active = 1",
+        [now_iso] + disposition_ids,
+    )
+    updated = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return updated
+
+
 # ── 工具函数 ────────────────────────────────────────────────────
 
 def _jaccard_sim(text1: str, text2: str) -> float:

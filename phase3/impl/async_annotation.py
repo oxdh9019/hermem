@@ -108,6 +108,64 @@ def stop_worker(wait: bool = True):
     print("[AsyncAnnotation] 后台工作线程已停止")
 
 
+def drain_queue(n_workers: int = 4, timeout: int = 300):
+    """
+    多线程并行 drain annotation 队列（用于 backfill）。
+    启动 N 个 worker 线程并行处理队列所有任务，最多等 timeout 秒。
+    不依赖 Hermem 主进程的 context。
+    """
+    import concurrent.futures, threading as _threading
+
+    _shutdown_flag = False  # reset for drain
+
+    def _drain_worker(wid: int):
+        from .l0_store import annotate_l0_after_l1_v2 as _annotate
+        from .config import ERROR_ANNOTATION_MODEL
+        processed = 0
+        while not _shutdown_flag:
+            try:
+                item = _annotation_queue.get(timeout=0.5)
+            except queue.Empty:
+                break
+            if len(item) == 2:
+                session_id, session_summary = item
+                l1_facts = []
+            else:
+                session_id, session_summary, l1_facts = item
+            try:
+                from .config import L0_DIR as _L0_DIR
+                l0_path = Path(_L0_DIR) / f"{session_id}.json"
+                if l0_path.exists():
+                    with open(l0_path) as f:
+                        data = json.load(f)
+                    if "error_annotation" in data:
+                        _annotation_queue.task_done()
+                        continue
+                annotation = _annotate(
+                    session_id=session_id,
+                    session_summary=session_summary,
+                    l1_facts=l1_facts,
+                    annotation_model=ERROR_ANNOTATION_MODEL,
+                )
+                if annotation and annotation.get("prediction_errors"):
+                    from .disposition_updater import update_dispositions_from_errors
+                    update_dispositions_from_errors(session_id, annotation)
+                elif annotation:
+                    from .disposition_updater import increment_success_count
+                    increment_success_count(session_id)
+            except Exception as e:
+                print(f"[Drain w{wid}] {session_id}: {e}")
+            finally:
+                _annotation_queue.task_done()
+                processed += 1
+        print(f"[Drain w{wid}] Done, processed {processed} tasks")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
+        futures = [pool.submit(_drain_worker, i) for i in range(n_workers)]
+        concurrent.futures.wait(futures, timeout=timeout)
+    print(f"[Drain] Queue drained.")
+
+
 def enqueue_annotation_lightweight(
     session_id: str,
     session_summary: str,

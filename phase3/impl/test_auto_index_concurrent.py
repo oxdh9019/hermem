@@ -108,7 +108,7 @@ finally:
 def test2_lock_code():
     """验证 hermem_auto_index_all.py 文件锁实现正确。"""
     print("\n[Test 2] 文件锁代码检查")
-    script_path = Path("/Users/oliver/.hermes/scripts/hermem_auto_index_all.py")
+    script_path = Path.home() / ".hermes" / "scripts" / "hermem_auto_index_all.py"
     content = script_path.read_text()
 
     checks = [

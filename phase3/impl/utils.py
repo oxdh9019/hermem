@@ -6,6 +6,7 @@ import numpy as np
 import requests
 import struct
 import json as _json
+from pathlib import Path
 from .config import OLLAMA_URL, DB_PATH
 
 
@@ -55,10 +56,41 @@ def get_embeddings_batch(texts: list[str], model: str = "bge-m3:latest") -> list
     ]
 
 
-# ── Ollama LLM ─────────────────────────────────────────────
-def llm_generate(prompt: str, model: str = "qwen2.5:3b",
+# ── Ollama LLM (native /api/chat) ─────────────────────────
+def llm_generate_ollama(prompt: str, model: str = "qwen3.5:4b-no-think",
+                          temperature: float = 0.1, max_tokens: int = 50) -> str:
+    """调用 Ollama 原生 /api/chat 接口（不走 OpenAI 兼容层）。
+
+    适用于 qwen3.5:4b-no-think 等需要直接 Ollama API 的模型。
+    注意：OLLAMA_URL 含 /v1 前缀，/api/chat 需要去掉 /v1。
+    """
+    import requests as _requests
+    base_url = OLLAMA_URL.replace("/v1", "")  # strip /v1 suffix for native API
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+    }
+    resp = _requests.post(
+        f"{base_url}/api/chat",
+        json=payload,
+        timeout=180,
+        headers={"Content-Type": "application/json"},
+    )
+    resp.raise_for_status()
+    content = resp.json().get("message", {}).get("content", "")
+    return content.strip()
+
+
+# ── Ollama LLM (OpenAI-compatible /chat/completions) ──────
+def llm_generate(prompt: str, model: str = "qwen3.5:4b-no-think",
                  temperature: float = 0.3, max_tokens: int = 2048) -> str:
-    """调用 Ollama chat API 生成文本，带超时和重试"""
+    """调用 LLM（Ollama 或 MiniMax），根据 model 名称自动路由"""
+    # MiniMax 路由（支持 MiniMax-M2.7、MiniMax-M2 等）
+    if model and "MiniMax" in model:
+        return _call_minimax(prompt, model=model, temperature=temperature, max_tokens=max_tokens)
+
+    # Ollama 默认路径
     import urllib.request
     payload = {
         "model": model,
@@ -80,6 +112,53 @@ def llm_generate(prompt: str, model: str = "qwen2.5:3b",
         except Exception as e:
             if attempt == 0:
                 print(f"  [llm] retry after error: {e}")
+                continue
+            raise
+
+
+def _call_minimax(prompt: str, model: str = "MiniMax-M2.7",
+                  temperature: float = 0.3, max_tokens: int = 2048) -> str:
+    """调用 MiniMax Chat API（Anthropic 兼容格式）"""
+    import urllib.request, re
+    _AUTH_PATH = Path.home() / ".hermes" / "auth.json"
+    if not _AUTH_PATH.exists():
+        raise RuntimeError(f"auth.json not found at {_AUTH_PATH}")
+    _cred = json_loads(_AUTH_PATH.read_text())
+    creds = _cred["credential_pool"]["minimax-cn"][0]
+    api_key = creds["access_token"]
+    base_url = "https://api.minimaxi.com/anthropic"
+
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "no_think": True,
+    }
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request(
+                base_url + "/v1/messages",
+                data=json_dumps(payload).encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                    "anthropic-version": "2023-06-01",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                data = json_loads(resp.read())
+            content = data.get("content", [])
+            raw = next((c["text"] for c in content if c.get("type") == "text"), "")
+            # Remove markdown code block wrappers
+            raw = re.sub(r"^```json\s*", "", raw)
+            raw = re.sub(r"^\s*```", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            return raw.strip()
+        except Exception as e:
+            if attempt == 0:
+                print(f"  [minimax] retry after error: {e}")
                 continue
             raise
 

@@ -22,7 +22,7 @@ import sys
 import os
 import re
 
-TEST_SET_PATH = "/Users/oliver/.hermes/projects/hermem/eval/per_turn_judgment_testset.json"
+TEST_SET_PATH = Path.home() / ".hermes" / "projects" / "hermem" / "eval" / "per_turn_judgment_testset.json"
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
 FEW_SHOT_PROMPT = """你是一个轻量级的对话记忆判断模型。对每条对话，判断是否需要记忆动作。

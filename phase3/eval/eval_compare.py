@@ -5,6 +5,7 @@ Models: qwen2.5:3b (baseline) vs qwen3.5:4b-no-think (proxy for 2b)
 Key fix: qwen3.5 requires "think": False at payload top-level (not in options).
 """
 import requests, json, time
+from pathlib import Path
 
 OLLAMA = "http://localhost:11434"
 
@@ -72,7 +73,10 @@ def call_ollama(model: str, prompt: str, timeout: int = 30) -> tuple[str, float]
 
 MODELS = ["qwen2.5:3b", "qwen3.5:2b", "qwen3.5:4b"]
 
-with open("/Users/oliver/.hermes/projects/hermem/eval/per_turn_judgment_testset.json") as f:
+EVAL_DIR = Path(__file__).resolve().parent  # phase3/eval/
+TEST_SET_PATH = EVAL_DIR / "per_turn_judgment_testset.json"
+
+with open(TEST_SET_PATH) as f:
     turns = json.load(f)
 
 print(f"Test set: {len(turns)} turns\n")
@@ -121,7 +125,7 @@ for model in MODELS:
     }
 
 # Save comparison
-output_path = "/Users/oliver/.hermes/projects/hermem/eval/model_comparison.json"
+output_path = EVAL_DIR / "model_comparison.json"
 with open(output_path, "w") as f:
     json.dump(all_results, f, ensure_ascii=False, indent=2)
 

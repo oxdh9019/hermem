@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Eval qwen3.5:4b with enough tokens for thinking + response."""
 import requests, json, time
+from pathlib import Path
 
 OLLAMA = "http://localhost:11434"
 MODEL = "qwen3.5:4b"
@@ -53,7 +54,11 @@ def parse_output(raw: str) -> dict | None:
             pass
     return None
 
-with open("/Users/oliver/.hermes/projects/hermem/eval/per_turn_judgment_testset.json") as f:
+EVAL_DIR = Path(__file__).resolve().parent.parent  # phase3/eval/ -> phase3/
+TEST_SET_PATH = EVAL_DIR / "per_turn_judgment_testset.json"
+RESULTS_PATH = EVAL_DIR / "qwen35_4b_results.json"
+
+with open(TEST_SET_PATH) as f:
     turns = json.load(f)
 
 results = []

@@ -163,7 +163,7 @@ class IntentClassifier:
             pass
     """
 
-    def __init__(self, model: str = "qwen2.5:3b"):
+    def __init__(self, model: str = "qwen3.5:4b-no-think"):
         self.model = model
 
     def classify(self, message: str) -> str:

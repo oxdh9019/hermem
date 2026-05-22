@@ -6,7 +6,9 @@ from collections import Counter
 sys.path.insert(0, '.')
 from impl.intent_classifier import IntentClassifier
 
-SESSION_DIR = '/Users/oliver/.hermes/sessions'
+from pathlib import Path
+
+SESSION_DIR = Path.home() / ".hermes" / "sessions"
 
 # 收集所有 Oliver 消息
 messages = []
