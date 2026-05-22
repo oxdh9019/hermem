@@ -111,6 +111,11 @@ def main():
                 # 写入 L1
                 fact_ids = store_l1_batch(facts, l0_ref)
                 written = [{**f, "id": fid} for f, fid in zip(facts, fact_ids)]
+                # V4.5: 更新所有 disposition 权重
+                from impl.disposition_updater import update_disposition_weights
+                weight_result = update_disposition_weights()
+                if weight_result.get("updated", 0) > 0:
+                    print(f"  [V4.5] Updated {weight_result['updated']} disposition weights")
                 # L2 聚合
                 try_aggregate_l2(written)
                 # L3 staging

@@ -77,6 +77,7 @@ _conn.execute("""
         error_type           TEXT,
         keywords             TEXT,
         source_session_id    TEXT,
+        source_agent         TEXT,
         confidence           REAL DEFAULT 1.0,
         error_count          INTEGER DEFAULT 0,
         success_count        INTEGER DEFAULT 0,
@@ -84,7 +85,10 @@ _conn.execute("""
         created_at           TEXT NOT NULL,
         last_used_at         TEXT,
         usage_count          INTEGER DEFAULT 0,
-        is_active            INTEGER DEFAULT 1
+        is_active            INTEGER DEFAULT 1,
+        scope                TEXT DEFAULT 'model_error',
+        weight               REAL DEFAULT 1.0,
+        intent               TEXT
     )
 """)
 _conn.execute("""

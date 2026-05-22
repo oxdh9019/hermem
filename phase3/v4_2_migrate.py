@@ -79,22 +79,27 @@ def save_dispositions(session_id: str, dispositions: list[dict], conn: sqlite3.C
         cond_emb = get_embedding(d["condition"])
         pred_emb = get_embedding(d["prediction"])
         now = datetime.now().isoformat()
-        disp_id = f"disp_{datetime.now().strftime('%Y%m%H%M%S')}_{hash(session_id) % 100000:05d}_{saved}"
+        disp_id = f"disp_{datetime.now().strftime('%Y%m%d%H%M%S')}_{hash(session_id) % 100000:05d}_{saved}"
         conn.execute("""
             INSERT INTO l1_dispositions
             (id, l0_ref, condition_text, prediction_text,
              condition_embedding, prediction_embedding,
-             confidence, source_session_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             confidence, source_session_id, source_agent,
+             error_type, scope, is_active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             disp_id,
-            session_id,
+            f"l0_{session_id}",
             d["condition"],
             d["prediction"],
             serialize_vec(cond_emb.tolist()),
             serialize_vec(pred_emb.tolist()),
             d.get("confidence", 1.0),
             session_id,
+            "v4_2_migrate",
+            "other",
+            "user_behavior",
+            1,
             now,
         ))
         saved += 1

@@ -130,15 +130,6 @@ def main():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # 确保 scope 和 keywords 列存在
-    cursor.execute("PRAGMA table_info(l1_dispositions)")
-    existing_cols = {r[1] for r in cursor.fetchall()}
-    for col, coltype in [("scope", "TEXT"), ("keywords", "TEXT")]:
-        if col not in existing_cols:
-            default = "'model_error'" if col == "scope" else "NULL"
-            cursor.execute(f"ALTER TABLE l1_dispositions ADD COLUMN {col} {coltype}")
-            print(f"添加列: {col}")
-
     added = 0
     for ann in annotations:
         model_pred = ann.get("model_prediction", "")[:50]

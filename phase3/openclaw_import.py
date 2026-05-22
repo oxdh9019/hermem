@@ -292,7 +292,7 @@ def save_dispositions(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             disp_id,
-            session_id,
+            f"l0_{session_id}",  # l0_ref — 统一格式
             d["condition"],
             d["prediction"],
             serialize_vec(cond_emb.tolist()),

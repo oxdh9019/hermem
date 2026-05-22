@@ -103,7 +103,8 @@ def extract_turn_facts(dialogue: str) -> list[dict]:
                 data = json.loads(match.group())
             except Exception:
                 return []
-        return []
+        else:
+            return []
 
     facts = data.get("facts", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
     valid = []
