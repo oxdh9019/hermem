@@ -7,10 +7,9 @@
 """
 
 import hashlib
+import logging
 import pickle
 import time
-import logging
-from typing import Optional
 
 import ollama
 
@@ -29,6 +28,7 @@ _proc_cache: dict[str, list[float]] = {}
 
 
 # ── Embedding ───────────────────────────────────────────
+
 
 def get_embedding_cached(text: str) -> tuple[list[float], str]:
     """获取文本的 embedding（优先进程缓存 > SQLite 缓存 > Ollama）。
@@ -79,6 +79,7 @@ def clear_proc_cache():
 
 
 # ── 健康检查 ────────────────────────────────────────────
+
 
 def is_ollama_healthy() -> dict:
     """检查 Ollama 服务和 bge-m3 模型是否可用。

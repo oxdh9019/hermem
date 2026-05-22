@@ -5,33 +5,41 @@ Hermem Phase 3 - 每日定时处理脚本
 
 触发时间: 每天 6:00 和 18:00
 """
-import sys, os, time
+
+import os
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "phase3"))
 os.chdir(str(PROJECT_ROOT / "phase3"))
 
-from impl import (
-    extract_l1_facts, store_l1_batch,
-    try_aggregate_l2, batch_stage_from_l1,
-    save_l0_raw, load_l0_detail,
-)
-from impl.async_annotation import start_worker, stop_worker, enqueue_annotation
+import sqlite3
 from datetime import datetime
-import sqlite3, json
+
+from impl import (
+    batch_stage_from_l1,
+    extract_l1_facts,
+    save_l0_raw,
+    store_l1_batch,
+    try_aggregate_l2,
+)
+from impl.async_annotation import enqueue_annotation, start_worker, stop_worker
 
 STATE_DB = Path.home() / ".hermes" / "state.db"
-OUT_DB   = Path.home() / ".hermes" / "memory" / "l0_l3.db"
-L0_DIR   = Path.home() / ".hermes" / "memory" / "l0_raw"
+OUT_DB = Path.home() / ".hermes" / "memory" / "l0_l3.db"
+L0_DIR = Path.home() / ".hermes" / "memory" / "l0_raw"
 
 
 def build_session_text(conn, session_id: str) -> str:
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT role, content FROM messages
         WHERE session_id = ?
         ORDER BY timestamp ASC
-    """, [session_id]).fetchall()
+    """,
+        [session_id],
+    ).fetchall()
     parts = []
     for role, content in rows:
         if not content:
@@ -80,8 +88,12 @@ def main():
             skipped += 1
             continue
 
-        started_dt = datetime.fromtimestamp(started).isoformat() if started else datetime.now().isoformat()
-        ended_dt = datetime.fromtimestamp(ended).isoformat() if ended else datetime.now().isoformat()
+        started_dt = (
+            datetime.fromtimestamp(started).isoformat() if started else datetime.now().isoformat()
+        )
+        ended_dt = (
+            datetime.fromtimestamp(ended).isoformat() if ended else datetime.now().isoformat()
+        )
         if title and len(str(title)) > 500:
             title = str(title)[:500]
 
@@ -110,9 +122,10 @@ def main():
             if facts:
                 # 写入 L1
                 fact_ids = store_l1_batch(facts, l0_ref)
-                written = [{**f, "id": fid} for f, fid in zip(facts, fact_ids)]
+                written = [{**f, "id": fid} for f, fid in zip(facts, fact_ids, strict=False)]
                 # V4.5: 更新所有 disposition 权重
                 from impl.disposition_updater import update_disposition_weights
+
                 weight_result = update_disposition_weights()
                 if weight_result.get("updated", 0) > 0:
                     print(f"  [V4.5] Updated {weight_result['updated']} disposition weights")
@@ -133,14 +146,20 @@ def main():
             failed += 1
 
     print(f"\n[Hermem Phase3 cron] 完成: {processed} 新会话处理, {skipped} 已跳过, {failed} 失败")
-    print(f"  L1 总量: {sqlite3.connect(OUT_DB).execute('SELECT COUNT(*) FROM l1_facts').fetchone()[0]}")
-    print(f"  L2 总量: {sqlite3.connect(OUT_DB).execute('SELECT COUNT(*) FROM l2_scenes').fetchone()[0]}")
-    print(f"  L3 staging: {sqlite3.connect(OUT_DB).execute('SELECT COUNT(*) FROM l3_staging').fetchone()[0]}")
+    print(
+        f"  L1 总量: {sqlite3.connect(OUT_DB).execute('SELECT COUNT(*) FROM l1_facts').fetchone()[0]}"
+    )
+    print(
+        f"  L2 总量: {sqlite3.connect(OUT_DB).execute('SELECT COUNT(*) FROM l2_scenes').fetchone()[0]}"
+    )
+    print(
+        f"  L3 staging: {sqlite3.connect(OUT_DB).execute('SELECT COUNT(*) FROM l3_staging').fetchone()[0]}"
+    )
 
     # 等待 annotation 队列处理完毕（最多 120 秒）
-    print(f"\n[Annotation] 等待队列清空...")
+    print("\n[Annotation] 等待队列清空...")
     stop_worker(wait=True)
-    print(f"[Annotation] 队列已清空，cron 结束")
+    print("[Annotation] 队列已清空，cron 结束")
 
 
 if __name__ == "__main__":

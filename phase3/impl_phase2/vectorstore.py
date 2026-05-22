@@ -9,7 +9,6 @@
 
 import json
 import logging
-import math
 import os
 import shutil
 from pathlib import Path
@@ -27,7 +26,7 @@ META_PATH = HERMEM_DIR / "hermem_meta.json"
 logger = logging.getLogger(__name__)
 
 # ── 全局状态 ────────────────────────────────────────────
-_vectors: Optional[np.ndarray] = None
+_vectors: np.ndarray | None = None
 _meta: dict = {"version": "1.0", "dim": 1024, "next_index": 0}
 
 
@@ -68,6 +67,7 @@ def _invalidate_cache():
 
 # ── 初始化 ──────────────────────────────────────────────
 
+
 def init_vectorstore():
     """初始化向量库（创建空 .npy 文件和元数据）。幂等操作。"""
     _load_meta()
@@ -82,6 +82,7 @@ def init_vectorstore():
 
 
 # ── 追加写入 ───────────────────────────────────────────
+
 
 def append_vectors(new_embeddings: list[list[float]]) -> list[int]:
     """追加向量到 npy 文件。
@@ -122,7 +123,7 @@ def append_vectors(new_embeddings: list[list[float]]) -> list[int]:
     return indices
 
 
-def get_vector(vec_index: int) -> Optional[np.ndarray]:
+def get_vector(vec_index: int) -> np.ndarray | None:
     """按 vec_index 获取单个向量。"""
     vectors = _load_vectors()
     if 0 <= vec_index < len(vectors):
@@ -138,10 +139,11 @@ def get_vectors_batch(vec_indices: list[int]) -> np.ndarray:
 
 # ── Top-K 检索 ─────────────────────────────────────────
 
+
 def cosine_topk(
     query_vec: list[float] | np.ndarray,
     k: int = 5,
-    exclude_indices: Optional[list[int]] = None,
+    exclude_indices: list[int] | None = None,
 ) -> list[tuple[int, float]]:
     """余弦相似度 top-k 检索。
 
@@ -175,7 +177,7 @@ def cosine_topk(
 def inner_product_topk(
     query_vec: list[float] | np.ndarray,
     k: int = 5,
-    exclude_indices: Optional[list[int]] = None,
+    exclude_indices: list[int] | None = None,
 ) -> list[tuple[int, float]]:
     """内积 top-k（适合归一化向量，比余弦更快）。"""
     vectors = _load_vectors()
@@ -192,6 +194,7 @@ def inner_product_topk(
 
 
 # ── 统计 ────────────────────────────────────────────────
+
 
 def get_stats() -> dict:
     """返回向量库统计信息。"""

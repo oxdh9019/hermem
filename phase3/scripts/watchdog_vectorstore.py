@@ -15,7 +15,6 @@ watchdog_vectorstore.py — 向量存储 drift 监控脚本
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -26,16 +25,17 @@ from impl.vectorstore import check_drift
 
 def main():
     parser = argparse.ArgumentParser(description="Hermem vectorstore drift watchdog")
-    parser.add_argument("--fix", action="store_true",
-                        help="自动修复（truncate npy to meta.next_index）")
-    parser.add_argument("--log", default="",
-                        help="日志文件路径（追加写入）")
+    parser.add_argument(
+        "--fix", action="store_true", help="自动修复（truncate npy to meta.next_index）"
+    )
+    parser.add_argument("--log", default="", help="日志文件路径（追加写入）")
     args = parser.parse_args()
 
     result = check_drift()
 
     # 构造日志行
     import datetime
+
     ts = datetime.datetime.now().isoformat()
     log_line = f"{ts}  {result['message']}"
 
@@ -75,11 +75,11 @@ def auto_fix(result: dict):
     - drift < 0：npy 多于 meta，truncate 多的行
     """
     import numpy as np
-    from impl.vectorstore import META_PATH, VEC_PATH, _write_meta, _invalidate_cache
+    from impl.vectorstore import VEC_PATH, _invalidate_cache
 
     drift = result["drift"]
     meta_next = result["meta_next"]
-    npy_rows = result["npy_rows"]
+    result["npy_rows"]
     target_rows = meta_next  # npy 应有的行数
 
     if drift == 0:

@@ -25,9 +25,8 @@ from pathlib import Path
 # ── Setup ───────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parents[2]  # phase3/scripts/ -> phase3/ -> projects/hermem-github
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from impl.config import DB_PATH, L1_EXTRACT_PROMPT
-from impl.utils import get_embeddings_batch, llm_generate, serialize_vec, json_dumps
-
+from impl.config import DB_PATH
+from impl.utils import get_embeddings_batch, json_dumps, llm_generate, serialize_vec
 
 # ── Fact extraction prompt（单轮版本）──────────────────────────────────────────
 
@@ -56,6 +55,7 @@ TURN_FACT_EXTRACT_PROMPT = """你是一个轻量级的事实提取模型。从�
 
 # ── Deduplication cache ───────────────────────────────────────────────────────
 
+
 class FactCache:
     """内存缓存：最近 N 条 fact 的 hash，用于去重。"""
 
@@ -79,6 +79,7 @@ class FactCache:
 
 # ── Core logic ───────────────────────────────────────────────────────────────
 
+
 def extract_turn_facts(dialogue: str) -> list[dict]:
     """从单轮对话片段提取原子事实。"""
     prompt = TURN_FACT_EXTRACT_PROMPT.format(DIALOGUE=dialogue)
@@ -97,7 +98,7 @@ def extract_turn_facts(dialogue: str) -> list[dict]:
         data = json.loads(text)
     except json.JSONDecodeError:
         # 尝试提取 JSON 数组
-        match = re.search(r'\[[\s\S]+\]', text)
+        match = re.search(r"\[[\s\S]+\]", text)
         if match:
             try:
                 data = json.loads(match.group())
@@ -106,7 +107,11 @@ def extract_turn_facts(dialogue: str) -> list[dict]:
         else:
             return []
 
-    facts = data.get("facts", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+    facts = (
+        data.get("facts", [])
+        if isinstance(data, dict)
+        else (data if isinstance(data, list) else [])
+    )
     valid = []
     for f in facts:
         c = f.get("content", "").strip()
@@ -132,27 +137,30 @@ def store_turn_facts(facts: list[dict], l0_ref: str, source: str = "turn_judgmen
     ids = []
 
     conn = sqlite3.connect(str(DB_PATH))
-    for fact, emb in zip(facts, embeddings):
+    for fact, emb in zip(facts, embeddings, strict=False):
         fid = f"fact_{uuid.uuid4().hex[:8]}"
         ids.append(fid)
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO l1_facts
             (id, l0_ref, types, type_confidence, fallback_type,
              content, tags, value, chunk_vector, created_at, status, source)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-        """, (
-            fid,
-            l0_ref,
-            json_dumps(fact.get("types", ["other"])),
-            fact.get("type_confidence", 1.0),
-            fact.get("fallback_type", "other"),
-            fact["content"],
-            json_dumps(fact.get("tags", [])),
-            fact.get("value", "medium"),
-            serialize_vec(emb.tolist()),
-            now,
-            source,
-        ))
+        """,
+            (
+                fid,
+                l0_ref,
+                json_dumps(fact.get("types", ["other"])),
+                fact.get("type_confidence", 1.0),
+                fact.get("fallback_type", "other"),
+                fact["content"],
+                json_dumps(fact.get("tags", [])),
+                fact.get("value", "medium"),
+                serialize_vec(emb.tolist()),
+                now,
+                source,
+            ),
+        )
     conn.commit()
     conn.close()
     return ids
@@ -171,9 +179,16 @@ def process_judgments(path: Path, dry_run: bool = False, limit: int | None = Non
         return {"skipped": 0, "extracted": 0, "stored": 0, "duplicates": 0}
 
     cache = FactCache(max_size=500)
-    stats = {"total": 0, "new_fact_true": 0, "extracted": 0, "stored": 0, "duplicates": 0, "errors": 0}
+    stats = {
+        "total": 0,
+        "new_fact_true": 0,
+        "extracted": 0,
+        "stored": 0,
+        "duplicates": 0,
+        "errors": 0,
+    }
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         lines = f.readlines()
 
     if limit:
@@ -216,7 +231,9 @@ def process_judgments(path: Path, dry_run: bool = False, limit: int | None = Non
         if to_store:
             l0_ref = f"turn_judgment_{session_id}"
             if dry_run:
-                print(f"[DRY-RUN] session={session_id} turn={entry.get('turn_counter')} would store {len(to_store)} facts")
+                print(
+                    f"[DRY-RUN] session={session_id} turn={entry.get('turn_counter')} would store {len(to_store)} facts"
+                )
                 for fact in to_store:
                     print(f"  -> {fact['content'][:80]}")
             else:
@@ -228,8 +245,11 @@ def process_judgments(path: Path, dry_run: bool = False, limit: int | None = Non
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Hermem V4.4 Phase2a: process turn_judgments.jsonl")
+    parser = argparse.ArgumentParser(
+        description="Hermem V4.4 Phase2a: process turn_judgments.jsonl"
+    )
     parser.add_argument("--dry-run", action="store_true", help="不写入，只打印")
     parser.add_argument("--limit", type=int, default=None, help="只处理最近 N 条")
     args = parser.parse_args()
@@ -243,7 +263,7 @@ def main():
 
     stats = process_judgments(journal_path, dry_run=args.dry_run, limit=args.limit)
 
-    print(f"\n[Phase2a] 完成:")
+    print("\n[Phase2a] 完成:")
     print(f"  总 judgment 条目: {stats['total']}")
     print(f"  new_fact_to_l1=true: {stats['new_fact_true']}")
     print(f"  提取到 facts 数: {stats['extracted']}")

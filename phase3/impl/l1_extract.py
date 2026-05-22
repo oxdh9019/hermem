@@ -3,46 +3,55 @@
 Hermem Phase 3 - L1 原子事实提取
 Step 3a: extract_l1_facts() + store_l1_batch()
 """
+
 import uuid
 from datetime import datetime
+
 from .config import DB_PATH, L1_EXTRACT_PROMPT
-from .utils import get_embeddings_batch, llm_generate, serialize_vec, json_dumps, json_loads
+from .utils import (
+    get_embeddings_batch,
+    json_dumps,
+    json_loads,
+    llm_generate,
+    serialize_vec,
+)
 
 
 def _try_fix_truncated_json(text: str):
     """
     尝试修复 LLM 返回的截断 JSON。
     LLM 输出常因 max_tokens 限制而在中间断开，常见模式：
-      - {"facts": [...]  →  缺 }] 
+      - {"facts": [...]  →  缺 }]
       - [{"a": "b", ...  →  缺 ]}
     """
     import re as _re
+
     # 统计括号深度
-    opens = text.count('{') + text.count('[')
-    closes = text.count('}') + text.count(']')
+    opens = text.count("{") + text.count("[")
+    closes = text.count("}") + text.count("]")
     if opens <= closes:
         return None
-    
+
     # 尝试追加缺失的闭合符
-    deficit = opens - closes
+    opens - closes
     # 从末尾向前找，统计未匹配的 { 和 [
     stack = []
-    for m in _re.finditer(r'[\{\[\}\]]', text):
+    for m in _re.finditer(r"[\{\[\}\]]", text):
         c = m.group()
-        if c in '{[':
+        if c in "{[":
             stack.append(c)
-        elif c in '}]':
-            expected = '{' if c == '}' else '['
+        elif c in "}]":
+            expected = "{" if c == "}" else "["
             if stack and stack[-1] == expected:
                 stack.pop()
             else:
                 stack.append(c)  # 不匹配，压入
-    
+
     if not stack:
         return None
-    
+
     # 补充缺失的闭合括号（逆序出栈）
-    suffix = ''.join('}' if s == '{' else ']' for s in reversed(stack))
+    suffix = "".join("}" if s == "{" else "]" for s in reversed(stack))
     fixed = text + suffix
     try:
         return json_loads(fixed)
@@ -54,18 +63,18 @@ def _try_extract_facts_regex(text: str):
     """
     通过正则从非标准 JSON 输出中提取 facts。
     处理 LLM 可能返回的各种格式：
-      - {"results": [...]} 
-      - {"data": [...]} 
+      - {"results": [...]}
+      - {"data": [...]}
       - 裸 fact 对象列表 [...]
     已知 LLM 会输出嵌套数组如 {"types": ["decision"]}，不能用简单正则
     """
     import re as _re
-    
+
     # 方法1：尝试找到第一个 [...] 数组块并解析
     # 从 [ 开始，平衡 ] 结束
     def find_json_array(s, start=0):
         """Find a JSON array starting at position start, handling nesting"""
-        i = s.find('[', start)
+        i = s.find("[", start)
         if i == -1:
             return None, -1
         depth = 0
@@ -76,7 +85,7 @@ def _try_extract_facts_regex(text: str):
             if escape:
                 escape = False
                 continue
-            if c == '\\':
+            if c == "\\":
                 escape = True
                 continue
             if c == '"':
@@ -84,22 +93,22 @@ def _try_extract_facts_regex(text: str):
                 continue
             if in_str:
                 continue
-            if c == '{':
+            if c == "{":
                 depth += 1
-            elif c == '}':
+            elif c == "}":
                 depth -= 1
-            elif c == '[':
+            elif c == "[":
                 depth += 1
-            elif c == ']':
+            elif c == "]":
                 depth -= 1
                 if depth == 0:
-                    return s[i:j+1], j+1
+                    return s[i : j + 1], j + 1
         return None, -1
 
     # 方法2：尝试找到第一个 {...} 对象块并解析
     def find_json_object(s, start=0):
         """Find a JSON object starting at position start, handling nesting"""
-        i = s.find('{', start)
+        i = s.find("{", start)
         if i == -1:
             return None, -1
         depth = 0
@@ -110,7 +119,7 @@ def _try_extract_facts_regex(text: str):
             if escape:
                 escape = False
                 continue
-            if c == '\\':
+            if c == "\\":
                 escape = True
                 continue
             if c == '"':
@@ -118,15 +127,15 @@ def _try_extract_facts_regex(text: str):
                 continue
             if in_str:
                 continue
-            if c == '{':
+            if c == "{":
                 depth += 1
-            elif c == '}':
+            elif c == "}":
                 depth -= 1
                 if depth == 0:
-                    return s[i:j+1], j+1
-            elif c == '[':
+                    return s[i : j + 1], j + 1
+            elif c == "[":
                 depth += 1
-            elif c == ']':
+            elif c == "]":
                 depth -= 1
         return None, -1
 
@@ -196,11 +205,12 @@ def extract_l1_facts(session_summary: str) -> list[dict]:
         text = text.lstrip("\n\r")
     text = text.strip().strip("`")
 
-    if text and text[0] not in ('{', '['):
+    if text and text[0] not in ("{", "["):
         import re as _re
-        m = _re.search(r'[\[{]', text)
+
+        m = _re.search(r"[\[{]", text)
         if m:
-            text = text[m.start():]
+            text = text[m.start() :]
 
     # 尝试解析，失败时尝试修复截断的 JSON
     data = None
@@ -229,6 +239,7 @@ def extract_l1_facts(session_summary: str) -> list[dict]:
         if not f.get("content") or f.get("value") not in ("high", "medium"):
             continue
         raw_types = f.get("types", ["other"])
+
         # 递归展开任意深度的嵌套列表
         def _flat(t):
             if not isinstance(t, list):
@@ -237,8 +248,22 @@ def extract_l1_facts(session_summary: str) -> list[dict]:
             for x in t:
                 result.extend(_flat(x))
             return result
+
         types = _flat(raw_types)
-        types = [t for t in types if t in ("decision", "bug-fix", "preference", "method", "todo", "unresolved", "other")]
+        types = [
+            t
+            for t in types
+            if t
+            in (
+                "decision",
+                "bug-fix",
+                "preference",
+                "method",
+                "todo",
+                "unresolved",
+                "other",
+            )
+        ]
         if not types:
             types = ["other"]
         valid.append({**f, "types": types})
@@ -251,16 +276,16 @@ def extract_dispositions(session_summary: str, l1_facts: list[dict] | None = Non
     从会话摘要中提取条件-预测对（dispositions）。
     可选传入已有 L1 facts 作为上下文辅助。
     """
-    from .utils import llm_generate, json_loads
+    from .utils import json_loads, llm_generate
 
     facts_text = ""
     if l1_facts:
         facts_text = "\n".join(
-            f"- [{f.get('types', ['?'])[0]}] {f.get('content', '')[:80]}"
-            for f in l1_facts[:10]
+            f"- [{f.get('types', ['?'])[0]}] {f.get('content', '')[:80]}" for f in l1_facts[:10]
         )
 
     from .config import DISPOSITION_EXTRACT_PROMPT
+
     prompt = DISPOSITION_EXTRACT_PROMPT % (
         session_summary,
         facts_text or "（无）",
@@ -280,7 +305,8 @@ def extract_dispositions(session_summary: str, l1_facts: list[dict] | None = Non
     text = text.strip().strip("`")
 
     import re as _re
-    match = _re.search(r'\[[\s\S]*\]', text)
+
+    match = _re.search(r"\[[\s\S]*\]", text)
     if match:
         data = json_loads(match.group())
     else:
@@ -297,7 +323,7 @@ def extract_dispositions(session_summary: str, l1_facts: list[dict] | None = Non
                 d = {
                     "condition": str(item[1]),
                     "prediction": str(item[3]),
-                    "confidence": float(item[5]) if item[5] is not None else 0.0
+                    "confidence": float(item[5]) if item[5] is not None else 0.0,
                 }
             except (IndexError, ValueError, TypeError):
                 continue
@@ -329,7 +355,6 @@ def store_l1_batch(facts: list[dict], l0_ref: str) -> list[str]:
         return []
 
     import sqlite3
-    from .utils import get_embedding
 
     texts = [f["content"] for f in facts]
     embeddings = get_embeddings_batch(texts)  # 批量 embedding
@@ -338,26 +363,29 @@ def store_l1_batch(facts: list[dict], l0_ref: str) -> list[str]:
     ids = []
 
     conn = sqlite3.connect(DB_PATH)
-    for fact, emb in zip(facts, embeddings):
+    for fact, emb in zip(facts, embeddings, strict=False):
         fid = f"fact_{uuid.uuid4().hex[:8]}"
         ids.append(fid)
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO l1_facts
             (id, l0_ref, types, type_confidence, fallback_type,
              content, tags, value, chunk_vector, created_at, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
-        """, (
-            fid,
-            l0_ref,
-            json_dumps(fact.get("types", ["other"])),
-            fact.get("type_confidence", 1.0),
-            fact.get("fallback_type", "other"),
-            fact["content"],
-            json_dumps(fact.get("tags", [])),
-            fact.get("value", "medium"),
-            serialize_vec(emb.tolist()),
-            now,
-        ))
+        """,
+            (
+                fid,
+                l0_ref,
+                json_dumps(fact.get("types", ["other"])),
+                fact.get("type_confidence", 1.0),
+                fact.get("fallback_type", "other"),
+                fact["content"],
+                json_dumps(fact.get("tags", [])),
+                fact.get("value", "medium"),
+                serialize_vec(emb.tolist()),
+                now,
+            ),
+        )
     conn.commit()
     conn.close()
     return ids

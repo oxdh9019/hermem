@@ -11,27 +11,26 @@ Solution: re-vectorize all 688 orphans, append to npy, update DB.
 
 import json
 import sqlite3
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
 import numpy as np
 import requests
-import threading
-import time
-from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from queue import Queue
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 # Hardcoded — avoids import issues with phase3 impl path
-HERMES_HOME  = Path.home() / ".hermes"
-NPY_PATH     = HERMES_HOME / "memory" / "hermem_vectors.npy"
-META_PATH    = HERMES_HOME / "memory" / "hermem_meta.json"
-DB_PATH      = HERMES_HOME / "memory" / "hermem.db"
-LOCK_FILE    = HERMES_HOME / "memory" / ".vector_lock"
+HERMES_HOME = Path.home() / ".hermes"
+NPY_PATH = HERMES_HOME / "memory" / "hermem_vectors.npy"
+META_PATH = HERMES_HOME / "memory" / "hermem_meta.json"
+DB_PATH = HERMES_HOME / "memory" / "hermem.db"
+LOCK_FILE = HERMES_HOME / "memory" / ".vector_lock"
 
-BATCH_SIZE   = 50      # rows per DB UPDATE
-CONCURRENCY  = 15      # parallel Ollama calls
-OLLAMA_BASE  = "http://localhost:11434"
-EMBED_MODEL  = "bge-m3:latest"        # same as Hermem's utils.py
-EMBED_DIM    = 1024                    # bge-m3 output dim (matches existing npy)
+BATCH_SIZE = 50  # rows per DB UPDATE
+CONCURRENCY = 15  # parallel Ollama calls
+OLLAMA_BASE = "http://localhost:11434"
+EMBED_MODEL = "bge-m3:latest"  # same as Hermem's utils.py
+EMBED_DIM = 1024  # bge-m3 output dim (matches existing npy)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -40,6 +39,7 @@ import fcntl
 
 class FileLock:
     """进程间文件锁（fcntl.flock），支持 with 语句。"""
+
     def __init__(self, path: Path, timeout: float = 5.0):
         self.path = path
         self.timeout = timeout
@@ -52,10 +52,10 @@ class FileLock:
             try:
                 fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return self
-            except (IOError, OSError):
+            except OSError:
                 if time.time() > deadline:
                     self._fd.close()
-                    raise RuntimeError(f"Could not acquire lock {self.path}")
+                    raise RuntimeError(f"Could not acquire lock {self.path}") from None
                 time.sleep(0.05)
 
     def __exit__(self, *args):
@@ -102,7 +102,7 @@ def update_db_batch(ids: list[int], new_indices: list[int]):
     # 临时表替代 f-string CASE WHEN（防止 SQL 注入）
     c.execute("CREATE TEMP TABLE IF NOT EXISTS _idx_map (chunk_id INTEGER, new_idx INTEGER)")
     c.execute("DELETE FROM _idx_map")
-    c.executemany("INSERT INTO _idx_map VALUES (?, ?)", list(zip(ids, new_indices)))
+    c.executemany("INSERT INTO _idx_map VALUES (?, ?)", list(zip(ids, new_indices, strict=False)))
     c.execute("""
         UPDATE chunks
         SET vec_index = (SELECT new_idx FROM _idx_map WHERE chunk_id = chunks.id)
@@ -144,12 +144,15 @@ def get_orphan_chunks() -> list[tuple]:
     # Get OOB (using Python side after loading meta)
     meta = load_meta()
     next_idx = meta.get("next_index", 706)
-    c.execute("""
+    c.execute(
+        """
         SELECT chunk_id, content, vec_index
         FROM chunks
         WHERE vec_index >= ?
         ORDER BY vec_index
-    """, (next_idx,))
+    """,
+        (next_idx,),
+    )
     oob_chunks = c.fetchall()
     conn.close()
     return null_chunks + oob_chunks
@@ -162,20 +165,24 @@ def get_orphan_chunks_v2() -> list[tuple]:
     meta = load_meta()
     next_idx = meta.get("next_index", 706)
 
-    c.execute("""
+    c.execute(
+        """
         SELECT id, content
         FROM chunks
         WHERE vec_index IS NULL
            OR vec_index = -1
            OR vec_index >= ?
         ORDER BY vec_index NULLS FIRST, id
-    """, (next_idx,))
+    """,
+        (next_idx,),
+    )
     rows = c.fetchall()
     conn.close()
     return rows
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
+
 
 def main():
     t0 = time.time()
@@ -204,14 +211,17 @@ def main():
     # Breakdown by type
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("""
+    c.execute(
+        """
         SELECT chunk_type, COUNT(*)
         FROM chunks
         WHERE vec_index IS NULL
            OR vec_index = -1
            OR vec_index >= ?
         GROUP BY chunk_type
-    """, (next_idx,))
+    """,
+        (next_idx,),
+    )
     for r in c.fetchall():
         print(f"  {r[0]}: {r[1]}")
     conn.close()
@@ -219,7 +229,7 @@ def main():
     # ── Phase 1: Generate embeddings ─────────────────────────────────────────
     print(f"\n[1/3] Generating embeddings ({CONCURRENCY} workers)...")
     texts = [row[1] for row in orphans]
-    ids   = [row[0] for row in orphans]
+    ids = [row[0] for row in orphans]
 
     embeddings: dict[int, np.ndarray] = {}
 
@@ -232,8 +242,7 @@ def main():
             return idx, np.zeros(EMBED_DIM, dtype=np.float32)
 
     with ThreadPoolExecutor(max_workers=CONCURRENCY) as ex:
-        futures = {ex.submit(genEmbedding, t, i): i
-                   for i, t in enumerate(texts)}
+        futures = {ex.submit(genEmbedding, t, i): i for i, t in enumerate(texts)}
         done = 0
         for fut in as_completed(futures):
             idx, vec = fut.result()
@@ -242,7 +251,7 @@ def main():
             if done % 100 == 0 or done == total:
                 print(f"  ... {done}/{total}")
 
-    print(f"  Done in {time.time()-t0:.1f}s")
+    print(f"  Done in {time.time() - t0:.1f}s")
 
     # ── Phase 2: Append to npy ───────────────────────────────────────────────
     print(f"\n[2/3] Appending {total} vectors to npy...")
@@ -266,7 +275,7 @@ def main():
 
     for batch_start in range(0, total, BATCH_SIZE):
         batch_end = min(batch_start + BATCH_SIZE, total)
-        batch_ids    = ids_ordered[batch_start:batch_end]
+        batch_ids = ids_ordered[batch_start:batch_end]
         batch_indices = new_indices[batch_start:batch_end]
         update_db_batch(batch_ids, batch_indices)
         print(f"  batch {batch_start}-{batch_end} ({len(batch_ids)} rows)")
@@ -296,7 +305,6 @@ def main():
     valid_count = c.fetchone()[0]
     print(f"  vec_index in valid range [0, {next_idx + total - 1}]: {valid_count}")
 
-    total_chunks = new_npy_rows  # every npy row corresponds to a chunk
     print(f"\n  npy rows : {new_npy_rows}")
     print(f"  valid DB : {valid_count}")
     print(f"  match?    : {'✓ YES' if valid_count == new_npy_rows else '✗ MISMATCH'}")
@@ -304,7 +312,7 @@ def main():
     conn.close()
 
     elapsed = time.time() - t0
-    print(f"\nDone in {elapsed:.1f}s ({total/elapsed:.1f} vectors/sec)")
+    print(f"\nDone in {elapsed:.1f}s ({total / elapsed:.1f} vectors/sec)")
     print("=" * 60)
 
 

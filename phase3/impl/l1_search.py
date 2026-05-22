@@ -4,16 +4,19 @@ Hermem Phase 3 - L1 检索（Step 3b + 3c）
 Step 3b: vector_search_l1() — 纯语义，无类型过滤
 Step 3c: retrieve() — 后处理 boost（替代硬过滤）
 """
-import json as json_lib
+
 import queue
 import re
 import threading
 from datetime import datetime as _dt
+
 from .config import DB_PATH
 from .utils import (
-    get_embedding, cosine_sim,
-    deserialize_vec, json_loads, json_dumps,
+    cosine_sim,
     db_query_dict,
+    deserialize_vec,
+    get_embedding,
+    json_loads,
 )
 
 
@@ -97,13 +100,13 @@ def disposition_aware_rerank(
     for d in dispositions:
         cond = d.get("condition", "") or ""
         # 简单分词：中文按字符，英文按空格
-        words = re.findall(r'[\u4e00-\u9fff]+', cond)
+        words = re.findall(r"[\u4e00-\u9fff]+", cond)
         for chunk in words:
             for i in range(len(chunk)):
                 condition_keywords.add(chunk[i])
             for i in range(len(chunk) - 1):
-                condition_keywords.add(chunk[i:i+2])
-        condition_keywords.update(w.lower() for w in re.findall(r'[a-zA-Z]+', cond))
+                condition_keywords.add(chunk[i : i + 2])
+        condition_keywords.update(w.lower() for w in re.findall(r"[a-zA-Z]+", cond))
 
     # 应用 boost
     boost_log: list[dict] = []
@@ -130,13 +133,15 @@ def disposition_aware_rerank(
             fact["_disposition_boost"] = False
         # 记录日志（所有有 _disposition_boost=True 的 fact）
         if fact.get("_disposition_boost"):
-            boost_log.append({
-                "fact_id":     fact["id"],
-                "fact_l0_ref": fact.get("l0_ref"),
-                "match_method": match_method,
-                "old_sim":     round(fact["_sim"] / boost_factor, 4),
-                "new_sim":     round(fact["_sim"], 4),
-            })
+            boost_log.append(
+                {
+                    "fact_id": fact["id"],
+                    "fact_l0_ref": fact.get("l0_ref"),
+                    "match_method": match_method,
+                    "old_sim": round(fact["_sim"] / boost_factor, 4),
+                    "new_sim": round(fact["_sim"], 4),
+                }
+            )
 
     # 重新按 _sim 降序排列
     l1_results.sort(key=lambda x: x["_sim"], reverse=True)
@@ -160,6 +165,7 @@ def _get_boost_log_path() -> str:
     global _BOOST_LOG_PATH
     if _BOOST_LOG_PATH is None:
         import os
+
         home = os.path.expanduser("~")
         log_dir = os.path.join(home, ".hermes", "logs")
         os.makedirs(log_dir, exist_ok=True)
@@ -171,7 +177,9 @@ def _ensure_boost_writer() -> None:
     """启动单个后台写线程（幂等）"""
     global _boost_writer_thread
     if _boost_writer_thread is None or not _boost_writer_thread.is_alive():
-        _boost_writer_thread = threading.Thread(target=_boost_writer_loop, daemon=True, name="boost-writer")
+        _boost_writer_thread = threading.Thread(
+            target=_boost_writer_loop, daemon=True, name="boost-writer"
+        )
         _boost_writer_thread.start()
 
 
@@ -196,10 +204,10 @@ def _write_boost_log(query: str, dispositions: list[dict], boost_entries: list[d
 
     disp_ids = [d.get("id", "")[:40] for d in dispositions]
     entry = {
-        "ts":              datetime.now().isoformat(),
-        "query":           query,
+        "ts": datetime.now().isoformat(),
+        "query": query,
         "disposition_ids": disp_ids,
-        "boosted_facts":   boost_entries,
+        "boosted_facts": boost_entries,
     }
     try:
         path = _get_boost_log_path()
@@ -219,6 +227,7 @@ def vector_search_l1(query_emb, top_k: int = 20) -> list[dict]:
     绝对不做任何 fact_type 过滤，只做向量相似度排序。
     """
     import sqlite3
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
@@ -232,15 +241,17 @@ def vector_search_l1(query_emb, top_k: int = 20) -> list[dict]:
     for row in rows:
         emb = deserialize_vec(row["chunk_vector"])
         sim = cosine_sim(q, emb)
-        results.append({
-            "id":       row["id"],
-            "l0_ref":   row["l0_ref"],
-            "types":    json_loads(row["types"]),
-            "content":  row["content"],
-            "tags":     json_loads(row["tags"]),
-            "value":    row["value"],
-            "_sim":     sim,
-        })
+        results.append(
+            {
+                "id": row["id"],
+                "l0_ref": row["l0_ref"],
+                "types": json_loads(row["types"]),
+                "content": row["content"],
+                "tags": json_loads(row["tags"]),
+                "value": row["value"],
+                "_sim": sim,
+            }
+        )
 
     results.sort(key=lambda x: x["_sim"], reverse=True)
     return results[:top_k]
@@ -265,14 +276,15 @@ def vector_search_dispositions(
                          为 None 时不做 intent 过滤。
     """
     import sqlite3
-    from .disposition_updater import compute_disposition_weight
+
     from .config import (
-        DISPOSITION_HALF_LIFE_DAYS,
-        DISPOSITION_MIN_COUNT,
-        DISPOSITION_MAX_FACTOR,
         DISPOSITION_BASE_WEIGHT,
+        DISPOSITION_HALF_LIFE_DAYS,
         DISPOSITION_MAX_ERROR_COUNT,
+        DISPOSITION_MAX_FACTOR,
+        DISPOSITION_MIN_COUNT,
     )
+    from .disposition_updater import compute_disposition_weight
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -330,22 +342,26 @@ def vector_search_dispositions(
             max_error_count_cap=DISPOSITION_MAX_ERROR_COUNT,
         )
 
-        results.append({
-            "id":             row["id"],
-            "l0_ref":         row["l0_ref"] if "l0_ref" in row.keys() and row["l0_ref"] else (row["source_session_id"] if "source_session_id" in row.keys() else None),
-            "condition":      row["condition_text"],
-            "prediction":     row["prediction_text"],
-            "confidence":     row["confidence"],
-            "source_agent":   row["source_agent"],
-            "intent":         row["intent"] if "intent" in row.keys() else None,
-            "scope":          row["scope"] if "scope" in row.keys() else None,
-            "error_count":    error_count,
-            "weight":         disp_weight,
-            "_sim":           sim,
-            "_f_time":        f_time_ranking,
-            "_error_factor":  error_factor,
-            "_activation":    activation_score,
-        })
+        results.append(
+            {
+                "id": row["id"],
+                "l0_ref": row["l0_ref"]
+                if "l0_ref" in row.keys() and row["l0_ref"]
+                else (row["source_session_id"] if "source_session_id" in row.keys() else None),
+                "condition": row["condition_text"],
+                "prediction": row["prediction_text"],
+                "confidence": row["confidence"],
+                "source_agent": row["source_agent"],
+                "intent": row["intent"] if "intent" in row.keys() else None,
+                "scope": row["scope"] if "scope" in row.keys() else None,
+                "error_count": error_count,
+                "weight": disp_weight,
+                "_sim": sim,
+                "_f_time": f_time_ranking,
+                "_error_factor": error_factor,
+                "_activation": activation_score,
+            }
+        )
 
     # B6: 按 activation_score 排序，而非原始相似度
     results.sort(key=lambda x: x["_activation"], reverse=True)
@@ -400,7 +416,9 @@ def retrieve(
     # Step 3: 后处理 boost（不是过滤！）
     # V4.5: disposition-aware rerank — 与 top dispositions 共享 l0_ref 的 fact 获得 boost
     if dispositions:
-        l1_results = disposition_aware_rerank(l1_results, dispositions, query=query, boost_factor=1.5)
+        l1_results = disposition_aware_rerank(
+            l1_results, dispositions, query=query, boost_factor=1.5
+        )
 
     if preferred_types:
         scored = []
@@ -413,11 +431,11 @@ def retrieve(
         l1_results = l1_results[:top_k]
 
     return {
-        "facts":        l1_results,
-        "scenes":       l2_scenes,
+        "facts": l1_results,
+        "scenes": l2_scenes,
         "dispositions": dispositions,
-        "query":        query,
-        "intent":       intent,
+        "query": query,
+        "intent": intent,
     }
 
 
@@ -441,7 +459,11 @@ def _associate_scenes(l1_results: list[dict]) -> list[dict]:
     matched_ids = set()
     for r in l1_results:
         for scene in all_scenes:
-            refs = json_loads(scene["l1_refs"]) if isinstance(scene["l1_refs"], str) else scene["l1_refs"]
+            refs = (
+                json_loads(scene["l1_refs"])
+                if isinstance(scene["l1_refs"], str)
+                else scene["l1_refs"]
+            )
             if r["id"] in refs:
                 matched_ids.add(scene["id"])
 

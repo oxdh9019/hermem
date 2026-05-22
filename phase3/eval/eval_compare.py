@@ -4,8 +4,12 @@ Models: qwen2.5:3b (baseline) vs qwen3.5:4b-no-think (proxy for 2b)
 
 Key fix: qwen3.5 requires "think": False at payload top-level (not in options).
 """
-import requests, json, time
+
+import json
+import time
 from pathlib import Path
+
+import requests
 
 OLLAMA = "http://localhost:11434"
 
@@ -29,8 +33,10 @@ PROMPT_TPL = """你是一个轻量级的对话记忆判断模型。对每条对�
 
 """
 
+
 def parse_json(raw: str) -> dict | None:
     import re
+
     # Try direct
     try:
         return json.loads(raw.strip())
@@ -52,6 +58,7 @@ def parse_json(raw: str) -> dict | None:
             pass
     return None
 
+
 def call_ollama(model: str, prompt: str, timeout: int = 30) -> tuple[str, float]:
     """Returns (response_text, latency_seconds)"""
     t0 = time.time()
@@ -59,7 +66,7 @@ def call_ollama(model: str, prompt: str, timeout: int = 30) -> tuple[str, float]
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "options": {"temperature": 0.1, "num_predict": 256}
+        "options": {"temperature": 0.1, "num_predict": 256},
     }
     # qwen3.5 requires think: False at top level
     if "qwen3.5" in model:
@@ -70,6 +77,7 @@ def call_ollama(model: str, prompt: str, timeout: int = 30) -> tuple[str, float]
         raise RuntimeError(f"API error {resp.status_code}: {resp.text}")
     lat = time.time() - t0
     return resp.json().get("response", "").strip(), lat
+
 
 MODELS = ["qwen2.5:3b", "qwen3.5:2b", "qwen3.5:4b"]
 
@@ -83,12 +91,12 @@ print(f"Test set: {len(turns)} turns\n")
 
 all_results = {}
 for model in MODELS:
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Model: {model}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     model_results = []
-    for i, (date, role, content, etype) in enumerate(turns, 1):
+    for i, (_date, role, content, etype) in enumerate(turns, 1):
         role_label = "用户" if role == "user" else "助手"
         prompt = PROMPT_TPL.format(content=f'{role_label}说"{content[:150]}"')
 
@@ -96,12 +104,14 @@ for model in MODELS:
             raw, lat = call_ollama(model, prompt)
             parsed = parse_json(raw)
             success = parsed is not None
-        except Exception as e:
+        except Exception:
             raw, lat = "", 0
             parsed, success = None, False
 
         r = {
-            "turn": i, "role": role, "etype": etype,
+            "turn": i,
+            "role": role,
+            "etype": etype,
             "latency_ms": round(lat * 1000, 1),
             "success": success,
             "parsed": parsed,
@@ -111,7 +121,9 @@ for model in MODELS:
         status = "✅" if success else "❌"
         print(f"[{i:2d}] {status} | {lat:.2f}s | {content[:40]}...")
         if parsed:
-            print(f"       → new_fact:{parsed.get('new_fact_to_l1')} recall:{parsed.get('needs_recall')} intent:{parsed.get('intent_hint','')}")
+            print(
+                f"       → new_fact:{parsed.get('new_fact_to_l1')} recall:{parsed.get('needs_recall')} intent:{parsed.get('intent_hint', '')}"
+            )
 
     successes = [r for r in model_results if r["success"]]
     avg_lat = sum(r["latency_ms"] for r in model_results) / len(model_results)
@@ -121,7 +133,7 @@ for model in MODELS:
         "total": len(model_results),
         "parse_success": len(successes),
         "avg_latency_ms": round(avg_lat, 1),
-        "turns": model_results
+        "turns": model_results,
     }
 
 # Save comparison
@@ -129,11 +141,13 @@ output_path = EVAL_DIR / "model_comparison.json"
 with open(output_path, "w") as f:
     json.dump(all_results, f, ensure_ascii=False, indent=2)
 
-print(f"\n{'='*60}")
+print(f"\n{'=' * 60}")
 print("FINAL COMPARISON")
-print(f"{'='*60}")
+print(f"{'=' * 60}")
 print(f"{'Model':<20} {'Parse':>8} {'Avg Latency':>12}")
 print("-" * 45)
 for model, res in all_results.items():
-    print(f"{model:<20} {res['parse_success']}/{res['total']:>4}      {res['avg_latency_ms']:>8.0f}ms")
+    print(
+        f"{model:<20} {res['parse_success']}/{res['total']:>4}      {res['avg_latency_ms']:>8.0f}ms"
+    )
 print(f"\nResults saved to {output_path}")

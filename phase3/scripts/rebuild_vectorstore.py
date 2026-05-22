@@ -16,16 +16,17 @@ rebuild_vectorstore.py — Hermem 向量存储完整重建脚本
 
 import argparse
 import json
-import numpy as np
 import sqlite3
 import sys
 from pathlib import Path
 
+import numpy as np
+
 HERMEM_DIR = Path.home() / ".hermes"
-MEM_DIR    = HERMEM_DIR / "memory"
-VEC_PATH   = MEM_DIR / "hermem_vectors.npy"
-META_PATH  = MEM_DIR / "hermem_meta.json"
-DB_PATH    = MEM_DIR / "hermem.db"
+MEM_DIR = HERMEM_DIR / "memory"
+VEC_PATH = MEM_DIR / "hermem_vectors.npy"
+META_PATH = MEM_DIR / "hermem_meta.json"
+DB_PATH = MEM_DIR / "hermem.db"
 
 
 def load_meta():
@@ -39,10 +40,10 @@ def load_vectors():
 
 def verify_only():
     """验证 chunks.vec_index 与向量矩阵的一致性。"""
-    meta   = load_meta()
-    vecs   = load_vectors()
-    conn   = sqlite3.connect(DB_PATH)
-    rows   = conn.execute(
+    meta = load_meta()
+    vecs = load_vectors()
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
         "SELECT id, vec_index FROM chunks WHERE vec_index IS NOT NULL ORDER BY vec_index"
     ).fetchall()
     conn.close()
@@ -59,7 +60,7 @@ def verify_only():
 
     # 检查 meta.next_index 是否合理
     expected_next = len(rows)
-    actual_next   = meta.get("next_index", 0)
+    actual_next = meta.get("next_index", 0)
 
     print(f"[verify] chunks with vec_index: {len(rows)}")
     print(f"[verify] vectors shape: {vecs.shape}")
@@ -100,7 +101,7 @@ def rebuild():
         print("[rebuild] No chunks with vec_index")
         return True
 
-    referenced = sorted(set(r[1] for r in rows))
+    referenced = sorted({r[1] for r in rows})
     n_referenced = len(referenced)
     max_ref = max(referenced)
     print(f"[rebuild] Referenced indices: {n_referenced}, max={max_ref}")
@@ -108,7 +109,7 @@ def rebuild():
     # 加载当前向量
     vecs = load_vectors()
     meta = load_meta()
-    npy_rows  = vecs.shape[0]
+    npy_rows = vecs.shape[0]
     meta_next = meta.get("next_index", 0)
     print(f"[rebuild] Current: npy={npy_rows}, meta.next_index={meta_next}")
 
@@ -143,6 +144,7 @@ def rebuild():
     tmp = Path("/tmp/_rebuild_vec.npy")
     np.save(str(tmp), compact_vecs)
     import shutil
+
     shutil.copy2(str(tmp), str(VEC_PATH))
     tmp.unlink(missing_ok=True)
 
@@ -160,8 +162,7 @@ def rebuild():
 
 def main():
     parser = argparse.ArgumentParser(description="Hermem vectorstore rebuild/verify")
-    parser.add_argument("--verify-only", action="store_true",
-                        help="仅验证，不做任何修改")
+    parser.add_argument("--verify-only", action="store_true", help="仅验证，不做任何修改")
     args = parser.parse_args()
 
     print(f"[rebuild] Vector store: {VEC_PATH}")

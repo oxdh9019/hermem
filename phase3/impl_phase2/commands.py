@@ -12,16 +12,15 @@
 import argparse
 import json
 import sys
-import time
 from pathlib import Path
 
 # 确保 impl 模块在路径中
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from impl.database import init_db, insert_chunk, get_chunk_count, get_chunks_by_session
+from impl.database import get_chunk_count, init_db, insert_chunk
 from impl.embedding import get_embedding_cached, is_ollama_healthy, test_embedding
-from impl.vectorstore import init_vectorstore, append_vectors, get_stats
-from impl.retrieval import semantic_search, keyword_search, hybrid_search
+from impl.retrieval import hybrid_search, keyword_search, semantic_search
+from impl.vectorstore import append_vectors, get_stats, init_vectorstore
 
 
 def cmd_search(args):
@@ -33,9 +32,13 @@ def cmd_search(args):
     mode = args.mode or "hybrid"
     top_k = args.top_k or 5
 
-    results = hybrid_search(args.query, top_k=top_k) if mode == "hybrid" else \
-              semantic_search(args.query, top_k=top_k) if mode == "semantic" else \
-              keyword_search(args.query, top_k=top_k)
+    results = (
+        hybrid_search(args.query, top_k=top_k)
+        if mode == "hybrid"
+        else semantic_search(args.query, top_k=top_k)
+        if mode == "semantic"
+        else keyword_search(args.query, top_k=top_k)
+    )
 
     if not results:
         print(f"未找到与「{args.query}」相关的记忆。")
@@ -84,7 +87,9 @@ def cmd_health(args):
 
     emb = test_embedding()
     if emb["success"]:
-        print(f"      ✅ Embedding 正常 | dim={emb['dim']} | {emb['latency_ms']}ms | 来源: {emb['source']}")
+        print(
+            f"      ✅ Embedding 正常 | dim={emb['dim']} | {emb['latency_ms']}ms | 来源: {emb['source']}"
+        )
     else:
         print(f"      ❌ Embedding 失败: {emb.get('error')}")
 
@@ -120,11 +125,10 @@ def cmd_import(args):
                 frontmatter = parts[1]
                 body = parts[2].strip()
                 # 简单解析 tags
-                tags = []
                 for line in frontmatter.splitlines():
                     if line.startswith("tags:"):
-                        tags_str = line.split("tags:", 1)[1].strip().strip("[]\"").replace("'", "")
-                        tags = [t.strip() for t in tags_str.replace('"', "").split(",") if t.strip()]
+                        tags_str = line.split("tags:", 1)[1].strip().strip('[]"').replace("'", "")
+                        [t.strip() for t in tags_str.replace('"', "").split(",") if t.strip()]
                 content = body
         session_id = file_path.stem
     else:
@@ -154,9 +158,9 @@ def cmd_init(args):
     """初始化数据库和向量库。"""
     init_db()
     result = init_vectorstore()
-    print(f"✅ Hermem Phase 2 初始化完成")
-    print(f"   数据库: ~/.hermes/memory/hermem.db")
-    print(f"   向量库: ~/.hermes/memory/hermem_vectors.npy")
+    print("✅ Hermem Phase 2 初始化完成")
+    print("   数据库: ~/.hermes/memory/hermem.db")
+    print("   向量库: ~/.hermes/memory/hermem_vectors.npy")
     print(f"   向量: {result['total_vectors']} 条, dim={result['dim']}")
 
 
@@ -170,7 +174,12 @@ def main():
     # search
     p_search = sub.add_parser("search", help="语义搜索记忆")
     p_search.add_argument("query", help="查询文本")
-    p_search.add_argument("--mode", choices=["semantic", "keyword", "hybrid"], default="hybrid", help="搜索模式")
+    p_search.add_argument(
+        "--mode",
+        choices=["semantic", "keyword", "hybrid"],
+        default="hybrid",
+        help="搜索模式",
+    )
     p_search.add_argument("--top-k", type=int, default=5, help="返回条数")
 
     # stats

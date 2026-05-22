@@ -74,7 +74,7 @@
 <DIALOGUE_HISTORY>
 ```
 
-### 组件 2: `memory-warmup` 
+### 组件 2: `memory-warmup`
 
 **触发方式**：在 AIAgent 的 system prompt 中注入
 

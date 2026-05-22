@@ -2,12 +2,14 @@
 """
 Hermem Phase 3 - 共享工具函数
 """
-import numpy as np
-import requests
-import struct
+
 import json as _json
 from pathlib import Path
-from .config import OLLAMA_URL, DB_PATH
+
+import numpy as np
+import requests
+
+from .config import DB_PATH, OLLAMA_URL
 
 
 # ── 向量操作 ────────────────────────────────────────────────
@@ -57,14 +59,19 @@ def get_embeddings_batch(texts: list[str], model: str = "bge-m3:latest") -> list
 
 
 # ── Ollama LLM (native /api/chat) ─────────────────────────
-def llm_generate_ollama(prompt: str, model: str = "qwen3.5:4b-no-think",
-                          temperature: float = 0.1, max_tokens: int = 50) -> str:
+def llm_generate_ollama(
+    prompt: str,
+    model: str = "qwen3.5:4b-no-think",
+    temperature: float = 0.1,
+    max_tokens: int = 50,
+) -> str:
     """调用 Ollama 原生 /api/chat 接口（不走 OpenAI 兼容层）。
 
     适用于 qwen3.5:4b-no-think 等需要直接 Ollama API 的模型。
     注意：OLLAMA_URL 含 /v1 前缀，/api/chat 需要去掉 /v1。
     """
     import requests as _requests
+
     base_url = OLLAMA_URL.replace("/v1", "")  # strip /v1 suffix for native API
     payload = {
         "model": model,
@@ -83,8 +90,12 @@ def llm_generate_ollama(prompt: str, model: str = "qwen3.5:4b-no-think",
 
 
 # ── Ollama LLM (OpenAI-compatible /chat/completions) ──────
-def llm_generate(prompt: str, model: str = "qwen3.5:4b-no-think",
-                 temperature: float = 0.3, max_tokens: int = 2048) -> str:
+def llm_generate(
+    prompt: str,
+    model: str = "qwen3.5:4b-no-think",
+    temperature: float = 0.3,
+    max_tokens: int = 2048,
+) -> str:
     """调用 LLM（Ollama 或 MiniMax），根据 model 名称自动路由"""
     # MiniMax 路由（支持 MiniMax-M2.7、MiniMax-M2 等）
     if model and "MiniMax" in model:
@@ -92,6 +103,7 @@ def llm_generate(prompt: str, model: str = "qwen3.5:4b-no-think",
 
     # Ollama 默认路径
     import urllib.request
+
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -116,10 +128,16 @@ def llm_generate(prompt: str, model: str = "qwen3.5:4b-no-think",
             raise
 
 
-def _call_minimax(prompt: str, model: str = "MiniMax-M2.7",
-                  temperature: float = 0.3, max_tokens: int = 2048) -> str:
+def _call_minimax(
+    prompt: str,
+    model: str = "MiniMax-M2.7",
+    temperature: float = 0.3,
+    max_tokens: int = 2048,
+) -> str:
     """调用 MiniMax Chat API（Anthropic 兼容格式）"""
-    import urllib.request, re
+    import re
+    import urllib.request
+
     _AUTH_PATH = Path.home() / ".hermes" / "auth.json"
     if not _AUTH_PATH.exists():
         raise RuntimeError(f"auth.json not found at {_AUTH_PATH}")
@@ -176,6 +194,7 @@ def json_loads(s: str):
 # ── DB helpers ─────────────────────────────────────────────
 def db_execute(sql: str, params=()):
     import sqlite3
+
     conn = sqlite3.connect(DB_PATH)
     conn.execute(sql, params)
     conn.commit()
@@ -184,6 +203,7 @@ def db_execute(sql: str, params=()):
 
 def db_query(sql: str, params=()) -> list[tuple]:
     import sqlite3
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.execute(sql, params)
     rows = cur.fetchall()
@@ -194,6 +214,7 @@ def db_query(sql: str, params=()) -> list[tuple]:
 
 def db_query_dict(sql: str, params=()) -> list[dict]:
     import sqlite3
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cur = conn.execute(sql, params)

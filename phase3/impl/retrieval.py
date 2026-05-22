@@ -24,11 +24,12 @@ RRF_W_KW = 0.35
 
 # ── 语义搜索 ───────────────────────────────────────────
 
+
 def semantic_search(
     query: str,
     top_k: int = DEFAULT_TOP_K,
-    chunk_type: Optional[str] = None,
-    concept_filter: Optional[list[str]] = None,
+    chunk_type: str | None = None,
+    concept_filter: list[str] | None = None,
 ) -> list[dict]:
     """语义召回：基于向量余弦相似度。
 
@@ -71,7 +72,7 @@ def semantic_search(
         rows = list(conn.execute(sql, params))
 
     # 4. 建立 vec_index → score 映射并按分值排序
-    index_to_score = {idx: score for idx, score in top_results}
+    index_to_score = dict(top_results)
     rows_sorted = sorted(
         rows,
         key=lambda r: index_to_score.get(r[7], 0),
@@ -80,6 +81,7 @@ def semantic_search(
 
     # 5. 概念标签过滤（AND）
     if concept_filter:
+
         def concepts_include(row_concepts: str, filters: list[str]) -> bool:
             if not row_concepts:
                 return False
@@ -89,15 +91,13 @@ def semantic_search(
                 return False
             return all(f in tags for f in filters)
 
-        rows_sorted = [
-            r for r in rows_sorted
-            if concepts_include(r["concepts"], concept_filter)
-        ]
+        rows_sorted = [r for r in rows_sorted if concepts_include(r["concepts"], concept_filter)]
 
     return rows_sorted[:top_k]
 
 
 # ── FTS5 关键词搜索 ────────────────────────────────────
+
 
 def _chinese_2gram(text: str) -> list[str]:
     """中文 2-gram 分词（滑动窗口）。"""
@@ -110,7 +110,7 @@ def _chinese_2gram(text: str) -> list[str]:
 def keyword_search(
     query: str,
     top_k: int = DEFAULT_TOP_K,
-    chunk_type: Optional[str] = None,
+    chunk_type: str | None = None,
 ) -> list[dict]:
     """FTS5 关键词搜索（中文 2-gram）。
 
@@ -124,7 +124,7 @@ def keyword_search(
     else:
         fts_query = " AND ".join(tokens)
 
-    placeholders = ",".join(["?"] * len(tokens)) if tokens else "?"
+    ",".join(["?"] * len(tokens)) if tokens else "?"
 
     sql = f"""
         SELECT c.id, c.session_id, c.content, c.chunk_type,
@@ -133,15 +133,11 @@ def keyword_search(
         FROM chunks_fts
         JOIN chunks c ON chunks_fts.rowid = c.id
         WHERE chunks_fts MATCH ?
-        {f"AND c.chunk_type = ?" if chunk_type else ""}
+        {"AND c.chunk_type = ?" if chunk_type else ""}
         ORDER BY rank
         LIMIT ?
     """
-    params = (
-        [fts_query] +
-        ([chunk_type] if chunk_type else []) +
-        [top_k]
-    )
+    params = [fts_query] + ([chunk_type] if chunk_type else []) + [top_k]
 
     with database.get_db() as conn:
         rows = list(conn.execute(sql, params))
@@ -151,11 +147,12 @@ def keyword_search(
 
 # ── 混合搜索 ───────────────────────────────────────────
 
+
 def hybrid_search(
     query: str,
     top_k: int = DEFAULT_TOP_K,
-    chunk_type: Optional[str] = None,
-    concept_filter: Optional[list[str]] = None,
+    chunk_type: str | None = None,
+    concept_filter: list[str] | None = None,
     w_sem: float = RRF_W_SEM,
     w_kw: float = RRF_W_KW,
 ) -> list[dict]:
@@ -168,7 +165,8 @@ def hybrid_search(
     """
     # 并行执行两路搜索
     sem_results = semantic_search(
-        query, top_k=top_k * 2,
+        query,
+        top_k=top_k * 2,
         chunk_type=chunk_type,
         concept_filter=concept_filter,
     )
@@ -210,6 +208,7 @@ def _rrf_fuse(
 
 
 # ── 便捷入口 ───────────────────────────────────────────
+
 
 def search(query: str, mode: str = "hybrid", **kwargs) -> list[dict]:
     """统一搜索入口。

@@ -10,22 +10,19 @@
 """
 
 import argparse
-import hashlib
 import json
 import re
 import sys
-from datetime import datetime
 from pathlib import Path
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from impl.database import init_db, insert_chunk, get_chunk_count
+from impl.database import get_chunk_count, init_db, insert_chunk
 from impl.embedding import get_embedding_cached
-from impl.vectorstore import init_vectorstore, append_vectors
-
+from impl.vectorstore import append_vectors, init_vectorstore
 
 # ── Browser Snapshot 清洗 ───────────────────────────────
+
 
 def clean_browser_snapshot(text: str) -> str:
     """从浏览器快照文本中提取干净的文章正文。
@@ -50,23 +47,24 @@ def clean_browser_snapshot(text: str) -> str:
 
     # 策略1：尝试当作 JSON 解析（最准确）
     # browser snapshot 通常是 {"success": true, "snapshot": "..."} 或直接是快照字符串
-    if text.strip().startswith('{') or text.strip().startswith('['):
+    if text.strip().startswith("{") or text.strip().startswith("["):
         try:
             parsed = json.loads(text)
             # 支持多种 JSON 结构
             snapshot = None
             if isinstance(parsed, dict):
-                snapshot = parsed.get('snapshot', '') or parsed.get('content', '')
+                snapshot = parsed.get("snapshot", "") or parsed.get("content", "")
                 if not snapshot:
                     # 可能是 {"success": true, "url": "...", "snapshot": {...}}
                     for v in parsed.values():
-                        if isinstance(v, dict) and 'snapshot' in v:
-                            snapshot = v['snapshot']
+                        if isinstance(v, dict) and "snapshot" in v:
+                            snapshot = v["snapshot"]
                             break
             elif isinstance(parsed, list):
-                snapshot = ' '.join(
-                    c.get('text', '') if isinstance(c, dict) else str(c)
-                    for c in parsed if isinstance(c, dict)
+                snapshot = " ".join(
+                    c.get("text", "") if isinstance(c, dict) else str(c)
+                    for c in parsed
+                    if isinstance(c, dict)
                 )
 
             if snapshot and isinstance(snapshot, str) and len(snapshot) > 50:
@@ -76,28 +74,28 @@ def clean_browser_snapshot(text: str) -> str:
 
     # 策略2：从 article.text 字段提取正文
     # 格式: "    - text: 文章内容..."
-    article_texts = re.findall(r'^\s+- text:\s*(.+)$', text, re.MULTILINE)
+    article_texts = re.findall(r"^\s+- text:\s*(.+)$", text, re.MULTILINE)
     if article_texts:
         # 取最长的几段（通常是正文）
         article_texts = [t.strip() for t in article_texts if len(t.strip()) > 30]
         if article_texts:
             # 合并所有 article.text，按长度排序取前5
-            combined = '\n'.join(sorted(article_texts, key=len, reverse=True)[:5])
+            combined = "\n".join(sorted(article_texts, key=len, reverse=True)[:5])
             if len(combined) > 50:
                 text = combined
 
     # 策略3：去除残留的 browser snapshot 标记
     # 去除 [ref=eN] [nth=N] [level=N] 等标记
-    text = re.sub(r'\s*\[ref=[^\]]+\]', '', text)
-    text = re.sub(r'\s*\[nth=[^\]]+\]', '', text)
-    text = re.sub(r'\s*\[level=[^\]]+\]', '', text)
+    text = re.sub(r"\s*\[ref=[^\]]+\]", "", text)
+    text = re.sub(r"\s*\[nth=[^\]]+\]", "", text)
+    text = re.sub(r"\s*\[level=[^\]]+\]", "", text)
     # 去除开头的列表标记 "  - "
-    text = re.sub(r'^  - ', '', text, flags=re.MULTILINE)
-    text = re.sub(r'^    - ', '', text, flags=re.MULTILINE)
+    text = re.sub(r"^  - ", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^    - ", "", text, flags=re.MULTILINE)
     # 去除空的或有残留标记的行
     lines = [line.strip() for line in text.splitlines()]
-    lines = [line for line in lines if line and not re.match(r'^[a-z]+:', line)]
-    text = '\n'.join(lines)
+    lines = [line for line in lines if line and not re.match(r"^[a-z]+:", line)]
+    text = "\n".join(lines)
 
     return text.strip()
 
@@ -108,20 +106,21 @@ def is_likely_browser_snapshot(text: str) -> bool:
         return False
     # 特征：包含 banner:、heading \、ref=[eN]、\/url: 等浏览器快照典型标记
     score = 0
-    if re.search(r'banner:|article:', text):
+    if re.search(r"banner:|article:", text):
         score += 2
     if re.search(r'heading\s+"[^"]+"\s+\[ref=', text):
         score += 2
-    if re.search(r'\[ref=e\d+\]', text):
+    if re.search(r"\[ref=e\d+\]", text):
         score += 1
     if re.search(r'\\"/url:', text):
         score += 1
-    if re.search(r'^\s+-\s+(img|text|link):', text, re.MULTILINE):
+    if re.search(r"^\s+-\s+(img|text|link):", text, re.MULTILINE):
         score += 1
     return score >= 3
 
 
 # ── Markdown 解析 ───────────────────────────────────────
+
 
 def parse_frontmatter(content: str) -> tuple[dict, str]:
     """解析 YAML frontmatter。返回 (frontmatter_dict, body)。"""
@@ -197,6 +196,7 @@ def extract_title_and_tags(body: str) -> tuple[str, list[str]]:
 
 # ── 迁移逻辑 ───────────────────────────────────────────
 
+
 def migrate_file(
     session_file: Path,
     dry_run: bool = False,
@@ -237,7 +237,7 @@ def migrate_file(
             indices = append_vectors([emb])
 
             # 入库
-            cid = insert_chunk(
+            insert_chunk(
                 session_id=session_id,
                 content=chunk_text,
                 chunk_type=chunk_type,
@@ -280,8 +280,10 @@ def migrate_all(
         r = migrate_file(f, dry_run=dry_run, chunk_size=chunk_size)
         results.append(r)
         if not dry_run:
-            print(f"  → 导入 {r['imported']} 条" +
-                  (f", 错误 {len(r['errors'])}" if r['errors'] else ""))
+            print(
+                f"  → 导入 {r['imported']} 条"
+                + (f", 错误 {len(r['errors'])}" if r["errors"] else "")
+            )
         else:
             print(f"  → dry-run: {r['total_chunks']} chunks")
 
@@ -289,6 +291,7 @@ def migrate_all(
 
 
 # ── CLI ─────────────────────────────────────────────────
+
 
 def main():
     parser = argparse.ArgumentParser(description="Hermem 历史迁移工具")
@@ -311,7 +314,7 @@ def main():
     )
 
     after = get_chunk_count()
-    print(f"\n=== 迁移完成 ===")
+    print("\n=== 迁移完成 ===")
     print(f"迁移前: {before} 条 | 新增: {after - before} 条 | 总计: {after} 条")
     total_chunks = sum(r["total_chunks"] for r in results)
     total_errors = sum(len(r["errors"]) for r in results)

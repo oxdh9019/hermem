@@ -9,7 +9,12 @@ Hermem 批量回填脚本
 
 依赖: Hermem impl 模块直接通过 Hermem 项目路径导入
 """
-import sys, json, glob, os, time, sqlite3
+
+import glob
+import json
+import sqlite3
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -61,12 +66,14 @@ def load_sessions():
         sid = data.get("session_id", Path(f).stem)
         ts = data.get("started_at", 0)
         dt = datetime.fromtimestamp(ts) if ts else None
-        sessions.append({
-            "path": f,
-            "session_id": sid,
-            "started_at": dt,
-            "data": data,
-        })
+        sessions.append(
+            {
+                "path": f,
+                "session_id": sid,
+                "started_at": dt,
+                "data": data,
+            }
+        )
     return sessions
 
 
@@ -88,7 +95,8 @@ def extract_text(data):
 
 def summarize_session(text: str) -> str:
     """调用 MiniMax API 生成会话摘要"""
-    import urllib.request, urllib.error
+    import urllib.error
+    import urllib.request
 
     prompt = (
         "请为以下对话会话生成一段简洁的摘要（200字以内），包含：\n"
@@ -137,19 +145,53 @@ def summarize_session(text: str) -> str:
 def extract_concepts(summary: str) -> list[str]:
     """从摘要中提取概念标签"""
     keywords = [
-        "量子", "QKD", "AES", "RSA", "PQC", "量子计算", "量子通讯",
-        "加密", "密码学", "密钥", "BB84",
-        "StoryAgent", "Story", "故事", "小说",
-        "Weibo", "微博", "监控",
-        "Claude", "Code", "编程", "开发",
-        "飞书", "WeChat", "微信",
-        "Hermes", "Agent", "AI",
-        "MiniMax", "Ollama", "LLM", "Embedding",
-        "comic", "连环画", "分镜", "定妆照",
-        "SEO", "网站",
-        "Apple", "macOS", "iPhone",
-        "cron", "自动化",
-        "财务", "审计", "创业", "机遇",
+        "量子",
+        "QKD",
+        "AES",
+        "RSA",
+        "PQC",
+        "量子计算",
+        "量子通讯",
+        "加密",
+        "密码学",
+        "密钥",
+        "BB84",
+        "StoryAgent",
+        "Story",
+        "故事",
+        "小说",
+        "Weibo",
+        "微博",
+        "监控",
+        "Claude",
+        "Code",
+        "编程",
+        "开发",
+        "飞书",
+        "WeChat",
+        "微信",
+        "Hermes",
+        "Agent",
+        "AI",
+        "MiniMax",
+        "Ollama",
+        "LLM",
+        "Embedding",
+        "comic",
+        "连环画",
+        "分镜",
+        "定妆照",
+        "SEO",
+        "网站",
+        "Apple",
+        "macOS",
+        "iPhone",
+        "cron",
+        "自动化",
+        "财务",
+        "审计",
+        "创业",
+        "机遇",
     ]
     found = [k for k in keywords if k in summary]
     return found[:5]
@@ -161,10 +203,7 @@ def is_already_indexed(session_id: str) -> bool:
         return False
     try:
         conn = sqlite3.connect(MEMORY_DB)
-        cur = conn.execute(
-            "SELECT 1 FROM chunks WHERE session_id = ? LIMIT 1",
-            (session_id,)
-        )
+        cur = conn.execute("SELECT 1 FROM chunks WHERE session_id = ? LIMIT 1", (session_id,))
         result = cur.fetchone()
         conn.close()
         return result is not None
@@ -189,11 +228,11 @@ def index_session(session: dict, dry_run: bool = False) -> bool:
 
     raw_text = extract_text(session["data"])
 
-    print(f"    生成摘要...")
+    print("    生成摘要...")
     summary = summarize_session(raw_text)
     concepts = extract_concepts(summary)
 
-    print(f"    生成 embedding...")
+    print("    生成 embedding...")
     emb, src = emb_mod.get_embedding_cached(summary)
     vec_indices = vs_mod.append_vectors([emb])
 
@@ -220,7 +259,7 @@ def main():
     sessions = load_sessions()
     sessions.sort(key=lambda s: s["started_at"] or 0)
 
-    print(f"=== Hermem 批量回填 ===")
+    print("=== Hermem 批量回填 ===")
     print(f"  发现 {len(sessions)} 条会话")
     print(f"  模式: {'仅预览' if dry_run else '实际写入'}")
     print()
@@ -240,13 +279,15 @@ def main():
         time.sleep(0.15)  # 避免 Ollama 过载
 
     print()
-    print(f"=== 完成 ===")
+    print("=== 完成 ===")
     print(f"  新增索引: {indexed} 条")
     print(f"  跳过: {skipped} 条")
 
     if not dry_run:
-        print(f"  Hermem 当前: {db_mod.get_chunk_count()} 条记忆, "
-              f"向量 {vs_mod.get_stats()['total_vectors']} 条")
+        print(
+            f"  Hermem 当前: {db_mod.get_chunk_count()} 条记忆, "
+            f"向量 {vs_mod.get_stats()['total_vectors']} 条"
+        )
 
 
 if __name__ == "__main__":

@@ -15,9 +15,7 @@
 import fcntl
 import json
 import logging
-import math
 import os
-import shutil
 import threading
 from pathlib import Path
 from typing import Optional
@@ -28,15 +26,15 @@ import numpy as np
 HERMEM_DIR = Path.home() / ".hermes" / "memory"
 HERMEM_DIR.mkdir(parents=True, exist_ok=True)
 
-VEC_PATH   = HERMEM_DIR / "hermem_vectors.npy"
-META_PATH  = HERMEM_DIR / "hermem_meta.json"
-LOCK_PATH  = HERMEM_DIR / ".vector_write.lock"   # 进程锁文件（init_vectorstore 时创建）
+VEC_PATH = HERMEM_DIR / "hermem_vectors.npy"
+META_PATH = HERMEM_DIR / "hermem_meta.json"
+LOCK_PATH = HERMEM_DIR / ".vector_write.lock"  # 进程锁文件（init_vectorstore 时创建）
 
 
 logger = logging.getLogger(__name__)
 
 # ── 全局状态 ────────────────────────────────────────────
-_vectors: Optional[np.ndarray] = None
+_vectors: np.ndarray | None = None
 _meta: dict = {"version": "1.0", "dim": 1024, "next_index": 0}
 
 # ── 锁 ─────────────────────────────────────────────────
@@ -44,7 +42,7 @@ _meta: dict = {"version": "1.0", "dim": 1024, "next_index": 0}
 _write_lock = threading.Lock()
 
 # 进程间文件锁句柄（延迟打开，首次写入时初始化）
-_lock_fd: Optional[int] = None
+_lock_fd: int | None = None
 
 
 def _acquire_file_lock():
@@ -57,7 +55,7 @@ def _acquire_file_lock():
         except FileNotFoundError:
             # init_vectorstore 还没跑，先创建锁文件
             _lock_fd = os.open(str(LOCK_PATH), os.O_CREAT | os.O_RDWR, 0o644)
-    fcntl.flock(_lock_fd, fcntl.LOCK_EX)   # 阻塞直到获得锁
+    fcntl.flock(_lock_fd, fcntl.LOCK_EX)  # 阻塞直到获得锁
 
 
 def _release_file_lock():
@@ -68,6 +66,7 @@ def _release_file_lock():
 
 
 # ── meta 读写 ───────────────────────────────────────────
+
 
 def _load_meta() -> dict:
     """加载或初始化元数据（幂等读）。"""
@@ -89,6 +88,7 @@ def _write_meta():
 
 # ── 向量缓存 ─────────────────────────────────────────────
 
+
 def _load_vectors() -> np.ndarray:
     """加载向量矩阵（惰性加载，进程内缓存）。"""
     global _vectors
@@ -108,6 +108,7 @@ def _invalidate_cache():
 
 # ── 初始化 ──────────────────────────────────────────────
 
+
 def init_vectorstore():
     """初始化向量库（创建空 .npy 文件和元数据）。幂等操作。"""
     _load_meta()
@@ -125,6 +126,7 @@ def init_vectorstore():
 
 
 # ── 追加写入（线程安全 + 进程安全）──────────────────────
+
 
 def append_vectors(new_embeddings: list[list[float]]) -> list[int]:
     """追加向量到 npy 文件。
@@ -146,12 +148,12 @@ def append_vectors(new_embeddings: list[list[float]]) -> list[int]:
     try:
         # ── 进程内锁（串行化同进程的所有线程）─────────
         with _write_lock:
-            meta    = _load_meta()
+            meta = _load_meta()
             vectors = _load_vectors()
 
             # 分配索引
             start_index = meta["next_index"]
-            end_index   = start_index + len(new_embeddings)
+            end_index = start_index + len(new_embeddings)
             indices = list(range(start_index, end_index))
 
             # 追加到内存矩阵
@@ -170,11 +172,13 @@ def append_vectors(new_embeddings: list[list[float]]) -> list[int]:
 
             # 同步更新进程内缓存
             _vectors = combined
-            _meta    = meta
+            _meta = meta
 
             logger.debug(
                 "append_vectors: %d vectors, indices=%s, new next_index=%d",
-                len(new_embeddings), indices, end_index
+                len(new_embeddings),
+                indices,
+                end_index,
             )
             return indices
 
@@ -184,7 +188,8 @@ def append_vectors(new_embeddings: list[list[float]]) -> list[int]:
 
 # ── 读取（无锁，只读操作）────────────────────────────────
 
-def get_vector(vec_index: int) -> Optional[np.ndarray]:
+
+def get_vector(vec_index: int) -> np.ndarray | None:
     """按 vec_index 获取单个向量。"""
     vectors = _load_vectors()
     if 0 <= vec_index < len(vectors):
@@ -200,10 +205,11 @@ def get_vectors_batch(vec_indices: list[int]) -> np.ndarray:
 
 # ── Top-K 检索 ─────────────────────────────────────────
 
+
 def cosine_topk(
     query_vec: list[float] | np.ndarray,
     k: int = 5,
-    exclude_indices: Optional[list[int]] = None,
+    exclude_indices: list[int] | None = None,
 ) -> list[tuple[int, float]]:
     """余弦相似度 top-k 检索。
 
@@ -219,7 +225,7 @@ def cosine_topk(
     q = np.array(query_vec, dtype=np.float32)
 
     # 向量化余弦计算
-    dots  = vectors @ q
+    dots = vectors @ q
     norms = np.linalg.norm(vectors, axis=1) * (np.linalg.norm(q) + 1e-8)
     scores = dots / norms
 
@@ -237,7 +243,7 @@ def cosine_topk(
 def inner_product_topk(
     query_vec: list[float] | np.ndarray,
     k: int = 5,
-    exclude_indices: Optional[list[int]] = None,
+    exclude_indices: list[int] | None = None,
 ) -> list[tuple[int, float]]:
     """内积 top-k（适合归一化向量，比余弦更快）。"""
     vectors = _load_vectors()
@@ -255,6 +261,7 @@ def inner_product_topk(
 
 # ── 统计 ────────────────────────────────────────────────
 
+
 def get_stats() -> dict:
     """返回向量库统计信息（无锁，读取 meta 文件）。"""
     meta = _load_meta()
@@ -268,6 +275,7 @@ def get_stats() -> dict:
 
 
 # ── drift 检测（watchdog 用）────────────────────────────
+
 
 def check_drift() -> dict:
     """检查 meta.next_index 与实际 npy 行数是否一致（直接读文件，无缓存）。"""
@@ -288,7 +296,7 @@ def check_drift() -> dict:
         npy_rows = 0
 
     drift = meta_next - npy_rows
-    ok    = (drift == 0)
+    ok = drift == 0
     if ok:
         msg = f"OK (next_index={meta_next}, npy_rows={npy_rows})"
     else:

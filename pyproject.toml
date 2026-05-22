@@ -11,6 +11,31 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+  "F",     # pyflakes
+  "E",     # pycodestyle errors
+  "W",     # pycodestyle warnings
+  "I",     # isort
+  "UP",    # pyupgrade
+  "B",     # flake8-bugbear
+  "C4",    # flake8-comprehensions
+  "FA",    # flake8-future-annotations
+]
+ignore = [
+  "E402",   # module-level import not at top (Hermem uses sys.path.insert / chdir)
+  "F401",   # imported but unused (re-export pattern, use __all__ explicitly)
+  "E501",   # line too long (handled by formatter)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"impl/__init__.py" = ["F401"]  # re-export pattern intentional
+
 [tool.pytest.ini_options]
 testpaths = ["phase3/tests"]
 pythonpath = ["phase3"]

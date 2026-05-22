@@ -20,8 +20,7 @@ Hermem Phase 3 - Error Annotation 验证脚本
 import json
 import pathlib
 import statistics
-from collections import Counter, defaultdict
-
+from collections import Counter
 
 L0_DIR = pathlib.Path.home() / ".hermes" / "memory" / "l0_raw"
 DB_PATH = pathlib.Path.home() / ".hermes" / "memory" / "l0_l3.db"
@@ -43,12 +42,14 @@ def load_l0_annotations(limit: int = 200) -> list[dict]:
         if not ea:
             continue
 
-        results.append({
-            "session_id": data.get("session_id", f.stem),
-            "error_annotation": ea,
-            "l0_size_kb": f.stat().st_size // 1024,
-            "messages_count": len(data.get("messages", [])),
-        })
+        results.append(
+            {
+                "session_id": data.get("session_id", f.stem),
+                "error_annotation": ea,
+                "l0_size_kb": f.stat().st_size // 1024,
+                "messages_count": len(data.get("messages", [])),
+            }
+        )
 
     return results
 
@@ -56,10 +57,11 @@ def load_l0_annotations(limit: int = 200) -> list[dict]:
 def load_l1_facts_per_session() -> dict[str, int]:
     """从 DB 加载每个 session 的 L1 facts 数量"""
     import sqlite3
+
     counts = {}
     try:
         conn = sqlite3.connect(DB_PATH)
-        for (sid, cnt) in conn.execute("SELECT l0_ref, COUNT(*) FROM l1_facts GROUP BY l0_ref"):
+        for sid, cnt in conn.execute("SELECT l0_ref, COUNT(*) FROM l1_facts GROUP BY l0_ref"):
             # l0_ref 格式是 "l0_{session_id}"
             session_id = sid.replace("l0_", "") if sid.startswith("l0_") else sid
             counts[session_id] = cnt
@@ -82,14 +84,16 @@ def main():
     annotated = len(annotations)
 
     print(f"[2] 有 error_annotation 的 session（最近200个）: {annotated}")
-    print(f"    覆盖率: {annotated/200:.0%}" if total_sessions >= 200 else "")
+    print(f"    覆盖率: {annotated / 200:.0%}" if total_sessions >= 200 else "")
 
     if not annotations:
         print("\n⚠️  尚无 error_annotation 数据，等待异步队列消费后重新运行")
         return
 
     # 2. surprise_level 分布
-    surprise_levels = Counter(a["error_annotation"].get("surprise_level", "unknown") for a in annotations)
+    surprise_levels = Counter(
+        a["error_annotation"].get("surprise_level", "unknown") for a in annotations
+    )
     total_annotated = sum(surprise_levels.values())
     print(f"\n[3] surprise_level 分布（共 {total_annotated} 个）:")
     for level in ["high", "medium", "low"]:
@@ -111,7 +115,7 @@ def main():
     for et, cnt in error_types.most_common():
         print(f"    {et}: {cnt}")
 
-    print(f"\n[5] severity 分布:")
+    print("\n[5] severity 分布:")
     for sev in ["high", "medium", "low"]:
         cnt = severity_counts.get(sev, 0)
         total_errs = sum(severity_counts.values())
@@ -119,7 +123,7 @@ def main():
         print(f"    {sev}: {cnt} ({pct:.1f}%)")
 
     # 4. L1 facts 密度对比
-    print(f"\n[6] L1 Facts 密度对比（高惊讶 vs 低惊讶）:")
+    print("\n[6] L1 Facts 密度对比（高惊讶 vs 低惊讶）:")
     facts_counts = load_l1_facts_per_session()
 
     high_sessions_msgs = []
@@ -152,22 +156,30 @@ def main():
             try:
                 # Welch's t-test（不假设方差齐性）
                 import math
+
                 n1, n2 = len(high_densities), len(low_densities)
-                mean1, mean2 = statistics.mean(high_densities), statistics.mean(low_densities)
+                mean1, mean2 = (
+                    statistics.mean(high_densities),
+                    statistics.mean(low_densities),
+                )
                 var1 = statistics.variance(high_densities) if n1 > 1 else 0
                 var2 = statistics.variance(low_densities) if n2 > 1 else 0
                 if var1 + var2 > 0:
-                    se = math.sqrt(var1/n1 + var2/n2)
+                    se = math.sqrt(var1 / n1 + var2 / n2)
                     t_stat = (mean1 - mean2) / se if se > 0 else 0
                     print(f"    差异 t-statistic: {t_stat:.3f}")
-                    print(f"    判断: {'✅ 高惊讶密度显著更高（signal有效）' if mean1 > mean2 and t_stat > 1.5 else '⚠️  差异不显著，需更多数据'}")
+                    print(
+                        f"    判断: {'✅ 高惊讶密度显著更高（signal有效）' if mean1 > mean2 and t_stat > 1.5 else '⚠️  差异不显著，需更多数据'}"
+                    )
             except Exception as e:
                 print(f"    统计检验跳过: {e}")
     else:
-        print(f"    数据不足：high={len(high_sessions_msgs)}, low={len(low_sessions_msgs)} （各需≥5）")
+        print(
+            f"    数据不足：high={len(high_sessions_msgs)}, low={len(low_sessions_msgs)} （各需≥5）"
+        )
 
     # 5. meta_prediction 抽样
-    print(f"\n[7] meta_prediction 抽样（最近5条 high surprise）:")
+    print("\n[7] meta_prediction 抽样（最近5条 high surprise）:")
     for a in annotations[:30]:
         if a["error_annotation"].get("surprise_level") == "high":
             meta = a["error_annotation"].get("meta_prediction", "")

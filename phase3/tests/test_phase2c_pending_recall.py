@@ -9,8 +9,8 @@ Hermem V4.4 Phase2c 单元测试：pending recall keywords 队列逻辑。
 4. 并发：多线程 enqueue/drain 线程安全
 5. 清理：shutdown / on_session_end 清空
 """
+
 import threading
-import time
 import unittest
 
 # ── Constants (mirror Phase2c implementation) ────────────────────────────────────
@@ -20,12 +20,13 @@ RECOLLECT_TIMEOUT_PER_KEYWORD = 2.0
 
 # ── Standalone queue implementation (exact copy from Phase2c) ──────────────────
 
+
 class MockProvider:
     """Minimal mock of HermemMemoryProvider's Phase2c queue logic."""
 
     def __init__(self):
         self._pending_recall_lock = threading.Lock()
-        self._pending_recall_keywords = []   # [(keyword, queued_at_turn), ...]
+        self._pending_recall_keywords = []  # [(keyword, queued_at_turn), ...]
         self._pending_recall_turn_counter = 0
 
     def enqueue_keywords(self, keywords, turn):
@@ -34,8 +35,7 @@ class MockProvider:
         with self._pending_recall_lock:
             queued_turn = turn
             for kw in keywords:
-                if not any(k == kw and q == queued_turn
-                           for k, q in self._pending_recall_keywords):
+                if not any(k == kw and q == queued_turn for k, q in self._pending_recall_keywords):
                     self._pending_recall_keywords.append((kw, queued_turn))
 
     def drain_keywords(self, current_turn):
@@ -43,7 +43,8 @@ class MockProvider:
         with self._pending_recall_lock:
             stale_threshold = current_turn - RECOLLECT_STALENESS_TURNS
             valid = [
-                kw for kw, queued_at in self._pending_recall_keywords
+                kw
+                for kw, queued_at in self._pending_recall_keywords
                 if queued_at >= stale_threshold
             ]
             self._pending_recall_keywords.clear()
@@ -62,6 +63,7 @@ class MockProvider:
 
 
 # ── Test cases ────────────────────────────────────────────────────────────────
+
 
 class TestPhase2cInit(unittest.TestCase):
     def test_constants(self):
@@ -116,7 +118,10 @@ class TestPhase2cStaleness(unittest.TestCase):
         """Keywords older than RECOLLECT_STALENESS_TURNS are filtered."""
         p = MockProvider()
         p._pending_recall_keywords = [
-            ("kw1", 1), ("kw2", 2), ("kw3", 3), ("kw4", 4),
+            ("kw1", 1),
+            ("kw2", 2),
+            ("kw3", 3),
+            ("kw4", 4),
         ]
         p._pending_recall_turn_counter = 5
         valid = p.drain_keywords(5)
@@ -170,7 +175,8 @@ class TestPhase2cMultiTurn(unittest.TestCase):
         """Keyword queued 5 turns ago should be discarded at drain."""
         p = MockProvider()
         p._pending_recall_keywords = [
-            ("recent", 5), ("old", 1),
+            ("recent", 5),
+            ("old", 1),
         ]
         p._pending_recall_turn_counter = 6
         valid = p.drain_keywords(6)
@@ -199,10 +205,7 @@ class TestPhase2cConcurrency(unittest.TestCase):
                 kw = f"t{threading.current_thread().name}_kw{i}"
                 p.enqueue_keywords([kw], turn=1)
 
-        threads = [
-            threading.Thread(target=worker, name=f"W{i}")
-            for i in range(num_threads)
-        ]
+        threads = [threading.Thread(target=worker, name=f"W{i}") for i in range(num_threads)]
         for t in threads:
             t.start()
         for t in threads:

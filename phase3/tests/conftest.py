@@ -1,4 +1,5 @@
 """pytest configuration: ensure impl module is importable from any cwd."""
+
 import sys
 from pathlib import Path
 

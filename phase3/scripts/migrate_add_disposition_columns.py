@@ -4,6 +4,7 @@
 
 安全：ALTER TABLE ADD COLUMN 对已存在的列会报错，用 PRAGMA table_info 检查。
 """
+
 import sqlite3
 import sys
 from pathlib import Path
@@ -11,14 +12,14 @@ from pathlib import Path
 DB_PATH = Path.home() / ".hermes" / "memory" / "l0_l3.db"
 
 COLUMNS_TO_ADD = [
-    ("source_agent",         "TEXT",              None),
-    ("scope",               "TEXT",              "'model_error'"),
-    ("weight",              "REAL",              "1.0"),
-    ("intent",              "TEXT",              None),
+    ("source_agent", "TEXT", None),
+    ("scope", "TEXT", "'model_error'"),
+    ("weight", "REAL", "1.0"),
+    ("intent", "TEXT", None),
     # error_type/keywords/source_session_id 三个 V4.2 列，防旧 DB 缺失
-    ("error_type",           "TEXT",              None),
-    ("keywords",            "TEXT",              None),
-    ("source_session_id",    "TEXT",              None),
+    ("error_type", "TEXT", None),
+    ("keywords", "TEXT", None),
+    ("source_session_id", "TEXT", None),
 ]
 
 

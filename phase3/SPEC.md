@@ -131,13 +131,13 @@ def load_l0_detail(l0_ref: str, context_hint: str = None) -> str:
     l0_path = L0_DIR / f"{l0_ref}.json"
     if not l0_path.exists():
         return "（原始会话已过期/不存在）"
-    
+
     with open(l0_path) as f:
         l0 = json.load(f)
-    
+
     if not context_hint:
         return json.dumps(l0, ensure_ascii=False)
-    
+
     # 简单过滤：保留包含关键词的 messages
     relevant = [m for m in l0["messages"] if context_hint.lower() in m.get("content", "").lower()]
     return json.dumps({**l0, "messages": relevant}, ensure_ascii=False, indent=2)
@@ -302,7 +302,7 @@ def try_aggregate_l2(new_l1_facts: list[dict], new_scene_emb: list[float]):
     """
     # Step 1: 查询所有 active scenes 的 embedding
     scenes = db.query("SELECT * FROM l2_scenes WHERE status = 'active'")
-    
+
     # Step 2: 计算与每个 scene 的余弦相似度
     best_match = None
     best_sim = 0
@@ -311,7 +311,7 @@ def try_aggregate_l2(new_l1_facts: list[dict], new_scene_emb: list[float]):
         if sim > SIMILARITY_THRESHOLD_JOIN and sim > best_sim:
             best_match = scene
             best_sim = sim
-    
+
     if best_match:
         # 归入现有 scene
         add_l1_to_scene(best_match["id"], [f["id"] for f in new_l1_facts])
@@ -342,8 +342,8 @@ def check_scene_dormancy():
     """每日定时任务：将超期 active scene 标记为 dormant"""
     cutoff = (datetime.now() - timedelta(days=SCENE_DORMANT_DAYS)).isoformat()
     db.execute("""
-        UPDATE l2_scenes 
-        SET status = 'dormant' 
+        UPDATE l2_scenes
+        SET status = 'dormant'
         WHERE status = 'active' AND last_seen < ?
     """, [cutoff])
 ```
@@ -375,7 +375,7 @@ CREATE INDEX idx_l2_last_seen ON l2_scenes(last_seen);
 #### 3.4.1 架构调整：Staging Area
 
 ```
-L1 自动提取的 preference 
+L1 自动提取的 preference
         ↓
     进入 staging area（待确认列表）
         ↓
@@ -403,7 +403,7 @@ CREATE TABLE l3_staging (
 def process_l3_staging():
     """每日定时任务：处理 staging area"""
     pending = db.query("SELECT * FROM l3_staging WHERE confirmed = 0 ORDER BY created_at")
-    
+
     if len(pending) >= 5:
         # 生成确认消息推送给 Oliver
         msg = "以下是从最近会话中提取的偏好，请确认哪些想保留到个人画像：\n\n"
@@ -411,7 +411,7 @@ def process_l3_staging():
             msg += f"{i}. {p['content']} (来源: {p['source']})\n"
         msg += "\n回复编号确认，回复「跳过」忽略本次"
         send_to_oliver(msg)  # 通过 weixin 或 feishu 推送
-    
+
     # 处理 Oliver 的回复（通过消息路由）
     # confirmed → 写入 user_profile.md
     # rejected → 标记 confirmed = -1
@@ -474,10 +474,10 @@ def retrieve(query: str, preferred_types: list[str] = None, top_k: int = 5) -> d
     # Step 1: 纯语义搜索 top_k=20（不做任何类型过滤）
     query_emb = get_query_embedding(query)
     l1_results = vector_search_l1(query_emb, top_k=20)
-    
+
     # Step 2: 关联到 L2 scenes
     l2_scenes = associate_scenes(l1_results)
-    
+
     # Step 3: 后处理 boost（不是过滤！）
     if preferred_types:
         scored = []
@@ -488,7 +488,7 @@ def retrieve(query: str, preferred_types: list[str] = None, top_k: int = 5) -> d
         l1_results = [r for r, _ in scored[:top_k]]
     else:
         l1_results = l1_results[:top_k]
-    
+
     # Step 4: 组装返回
     return {
         "scenes": l2_scenes,
@@ -506,7 +506,7 @@ def vector_search_l1(query_emb: list[float], top_k: int) -> list[dict]:
         "SELECT id, l0_ref, types, content, tags, value, chunk_vector FROM l1_facts WHERE status = 'active'"
     ).fetchall()
     conn.close()
-    
+
     q_vec = np.array(query_emb, dtype=np.float32)
     results = []
     for row in rows:
@@ -517,7 +517,7 @@ def vector_search_l1(query_emb: list[float], top_k: int) -> list[dict]:
             "content": row[3], "tags": json.loads(row[4]),
             "value": row[5], "_similarity": sim
         })
-    
+
     results.sort(key=lambda x: x["_similarity"], reverse=True)
     return results[:top_k]
 
@@ -526,19 +526,19 @@ def associate_scenes(l1_results: list[dict]) -> list[dict]:
     """将 L1 结果关联到 L2 scenes（按 scene_embedding 相似度）"""
     if not l1_results:
         return []
-    
+
     scene_ids = set()
     for r in l1_results:
         # 获取该 L1 的 tags，在 active scenes 中找相似
         tags = r["tags"]
         similar = db.query("""
-            SELECT * FROM l2_scenes 
+            SELECT * FROM l2_scenes
             WHERE status IN ('active', 'dormant')
             AND scene_similarity(tags, ?) > 0.6
         """, [json.dumps(tags)])
         for s in similar:
             scene_ids.add(s["id"])
-    
+
     return db.query("SELECT * FROM l2_scenes WHERE id IN (?)", [list(scene_ids)])
 ```
 

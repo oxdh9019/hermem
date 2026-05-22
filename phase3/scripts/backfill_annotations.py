@@ -11,11 +11,15 @@ Hermem Phase 3 - Annotation Backfill
 用法：
     python3 scripts/backfill_annotations.py [--limit N]
 """
-import sys, json, pathlib, time
+
+import json
+import pathlib
+import sys
+
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "phase3"))
 
-from impl.async_annotation import start_worker, drain_queue, enqueue_annotation
+from impl.async_annotation import drain_queue, enqueue_annotation
 
 L0_DIR = pathlib.Path.home() / ".hermes" / "memory" / "l0_raw"
 
@@ -25,8 +29,8 @@ def build_summary(d: dict) -> str:
     msgs = d.get("messages", [])
     if not msgs:
         return ""
-    user_msgs = [m for m in msgs if m.get("role") in ("user", "human")]
-    assistant_msgs = [m for m in msgs if m.get("role") in ("assistant", "bot")]
+    [m for m in msgs if m.get("role") in ("user", "human")]
+    [m for m in msgs if m.get("role") in ("assistant", "bot")]
     # Collect topics/content
     parts = []
     for m in msgs:

@@ -4,9 +4,10 @@ Hermem Phase 3 - L3 人格提炼
 Step 5a: stage_preference() — 将 preference 推入 staging area
 Step 5b: process_l3_staging() + confirm_preference()
 """
+
 import uuid
 from datetime import datetime
-from pathlib import Path
+
 from .config import DB_PATH, PROFILE_PATH, STAGING_CONFIRM_THRESHOLD
 
 
@@ -15,13 +16,17 @@ def stage_preference(fact_id: str, content: str, source: str):
     当 L1 中有 type=preference 时，存入 staging area。
     """
     import sqlite3
+
     conn = sqlite3.connect(DB_PATH)
     sid = f"staging_{uuid.uuid4().hex[:8]}"
-    conn.execute("""
+    conn.execute(
+        """
         INSERT OR IGNORE INTO l3_staging
         (id, fact_id, content, source, created_at, confirmed)
         VALUES (?, ?, ?, ?, ?, 0)
-    """, (sid, fact_id, content, source, datetime.now().isoformat()))
+    """,
+        (sid, fact_id, content, source, datetime.now().isoformat()),
+    )
     conn.commit()
     conn.close()
     return sid
@@ -30,6 +35,7 @@ def stage_preference(fact_id: str, content: str, source: str):
 def get_pending_preferences(limit: int = None) -> list[dict]:
     """返回待确认的 preference 列表"""
     import sqlite3
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     lim = limit or STAGING_CONFIRM_THRESHOLD
@@ -62,7 +68,11 @@ def process_l3_staging(notify_fn=None):
     if notify_fn:
         notify_fn(msg)
 
-    return {"status": "notified", "message": msg, "items": pending[:STAGING_CONFIRM_THRESHOLD]}
+    return {
+        "status": "notified",
+        "message": msg,
+        "items": pending[:STAGING_CONFIRM_THRESHOLD],
+    }
 
 
 def confirm_preference(staging_id: str) -> bool:
@@ -71,6 +81,7 @@ def confirm_preference(staging_id: str) -> bool:
     并追加到 user_profile.md。
     """
     import sqlite3
+
     conn = sqlite3.connect(DB_PATH)
     row = conn.execute(
         "SELECT content, source FROM l3_staging WHERE id=? AND confirmed=0",
@@ -100,6 +111,7 @@ def confirm_preference(staging_id: str) -> bool:
 def reject_preference(staging_id: str) -> bool:
     """用户 拒绝，标记为 rejected"""
     import sqlite3
+
     conn = sqlite3.connect(DB_PATH)
     conn.execute("UPDATE l3_staging SET confirmed=-1 WHERE id=?", [staging_id])
     conn.commit()

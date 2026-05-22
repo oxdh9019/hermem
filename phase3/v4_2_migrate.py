@@ -4,15 +4,19 @@ V4.2 迁移脚本：从 L0 JSON 文件批量提取 dispositions。
 遍历所有会话，调用 extract_dispositions() 生成条件-预测对。
 幂等设计：已有 disposition 的会话不重复处理。
 """
-import sys, json, re
+
+import json
+import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent))
+
+import sqlite3
+from datetime import datetime
 
 from impl.config import DB_PATH
 from impl.l1_extract import extract_dispositions
 from impl.utils import get_embedding, serialize_vec
-import sqlite3
-from datetime import datetime
 
 BATCH_SIZE = 3  # 每次最多处理会话数（LLM 调用慢）
 
@@ -21,18 +25,16 @@ def load_conversation_from_db(session_id: str) -> str | None:
     """从 state.db 读取会话消息，构建对话文本。"""
     try:
         import sqlite3
+
         conn = sqlite3.connect(Path.home() / ".hermes" / "state.db")
         rows = conn.execute(
             "SELECT role, content FROM messages WHERE session_id = ? ORDER BY timestamp",
-            (session_id,)
+            (session_id,),
         ).fetchall()
         conn.close()
         if not rows:
             return None
-        return "\n".join(
-            f"[{r[0]}] {str(r[1])[:300]}"
-            for r in rows if r[1]
-        )
+        return "\n".join(f"[{r[0]}] {str(r[1])[:300]}" for r in rows if r[1])
     except Exception:
         return None
 
@@ -46,8 +48,9 @@ def load_conversation_from_l0(session_id: str) -> str | None:
         data = json.loads(l0_path.read_text(encoding="utf-8"))
         msgs = data.get("messages", [])
         return "\n".join(
-            f"[{m.get('role','?')}] {str(m.get('content',''))[:300]}"
-            for m in msgs if m.get("content")
+            f"[{m.get('role', '?')}] {str(m.get('content', ''))[:300]}"
+            for m in msgs
+            if m.get("content")
         )
     except Exception:
         return None
@@ -56,6 +59,7 @@ def load_conversation_from_l0(session_id: str) -> str | None:
 def build_summary(conversation: str) -> str:
     """从对话生成 session_summary。"""
     from impl.utils import llm_generate
+
     prompt = f"""简要总结以下对话的核心内容和结论（3-5句中文）：
 
 {conversation[:3000]}
@@ -66,8 +70,7 @@ def build_summary(conversation: str) -> str:
 def disposition_exists(conn: sqlite3.Connection, session_id: str) -> bool:
     """检查该会话是否已有 disposition。"""
     row = conn.execute(
-        "SELECT 1 FROM l1_dispositions WHERE l0_ref = ? LIMIT 1",
-        (session_id,)
+        "SELECT 1 FROM l1_dispositions WHERE l0_ref = ? LIMIT 1", (session_id,)
     ).fetchone()
     return row is not None
 
@@ -80,28 +83,31 @@ def save_dispositions(session_id: str, dispositions: list[dict], conn: sqlite3.C
         pred_emb = get_embedding(d["prediction"])
         now = datetime.now().isoformat()
         disp_id = f"disp_{datetime.now().strftime('%Y%m%d%H%M%S')}_{hash(session_id) % 100000:05d}_{saved}"
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO l1_dispositions
             (id, l0_ref, condition_text, prediction_text,
              condition_embedding, prediction_embedding,
              confidence, source_session_id, source_agent,
              error_type, scope, is_active, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            disp_id,
-            f"l0_{session_id}",
-            d["condition"],
-            d["prediction"],
-            serialize_vec(cond_emb.tolist()),
-            serialize_vec(pred_emb.tolist()),
-            d.get("confidence", 1.0),
-            session_id,
-            "v4_2_migrate",
-            "other",
-            "user_behavior",
-            1,
-            now,
-        ))
+        """,
+            (
+                disp_id,
+                f"l0_{session_id}",
+                d["condition"],
+                d["prediction"],
+                serialize_vec(cond_emb.tolist()),
+                serialize_vec(pred_emb.tolist()),
+                d.get("confidence", 1.0),
+                session_id,
+                "v4_2_migrate",
+                "other",
+                "user_behavior",
+                1,
+                now,
+            ),
+        )
         saved += 1
     return saved
 
@@ -122,7 +128,7 @@ def run():
     """).fetchall()
     state_conn.close()
 
-    l0_dir = Path.home() / ".hermes" / "memory" / "l0_raw"
+    Path.home() / ".hermes" / "memory" / "l0_raw"
     db_conn = _sqlite3.connect(DB_PATH)
 
     print(f"发现 {len(sessions)} 个有实质对话的会话（>=3条用户消息）。")
@@ -183,9 +189,11 @@ def run():
     total_disp = db_conn.execute("SELECT COUNT(*) FROM l1_dispositions").fetchone()[0]
     remaining = sum(1 for s in sessions if not disposition_exists(db_conn, s[0]))
 
-    print(f"\n完成：新增 {total_saved} 条 dispositions，"
-          f"{total_skipped} 个会话无 disposition，"
-          f"{total_no_conv} 个无对话")
+    print(
+        f"\n完成：新增 {total_saved} 条 dispositions，"
+        f"{total_skipped} 个会话无 disposition，"
+        f"{total_no_conv} 个无对话"
+    )
     print(f"dispositions 表共 {total_disp} 条，剩余 {remaining} 个会话待处理。")
     print("重复运行以继续迁移。")
     db_conn.close()

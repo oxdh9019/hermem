@@ -14,6 +14,7 @@ OpenClaw 会话导入器 → Hermem V4.2 Disposition 评估
     python3 openclaw_import.py --agent main       # 只导入 main agent
     python3 openclaw_import.py --agent main --dry  # dry run（不写 DB）
 """
+
 import argparse
 import json
 import re
@@ -27,9 +28,9 @@ from typing import Optional
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from impl.config import DB_PATH
 from impl.l1_extract import extract_dispositions
 from impl.utils import get_embedding, serialize_vec
-from impl.config import DB_PATH
 
 # ── 常量 ─────────────────────────────────────────────────────────────────────
 OPENCLAW_ARCHIVE = Path.home() / ".openclaw" / "sessions_archive"
@@ -40,17 +41,17 @@ EXCLUDE_AGENTS = {"default", "volcengine-plan-ark-code-latest"}
 
 # ── 解析器 ───────────────────────────────────────────────────────────────────
 
+
 def extract_text_from_content(content) -> str:
     """从 message.content 列表中提取纯文本。"""
     if isinstance(content, list):
         return " ".join(
-            c.get("text", "") for c in content
-            if isinstance(c, dict) and c.get("type") == "text"
+            c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"
         )
     return str(content) if content else ""
 
 
-def parse_session_file(path: Path) -> Optional[dict]:
+def parse_session_file(path: Path) -> dict | None:
     """
     解析一个 .jsonl session 文件。
     返回 dict: {
@@ -181,14 +182,14 @@ def clean_oliver_message(content: str) -> str:
     # 先找 "Oliver:" 的位置
     match = re.search(r"\n?(?:\[message_id:[^\]]*\] )?Oliver:", content)
     if match:
-        return content[match.end():].strip()
+        return content[match.end() :].strip()
 
     # email/oxdh99 格式：Conversation info (untrusted metadata) {...} Sender (untrusted metadata) {...}
     # 结构：4个 fence，第四个 ``` 之后才是正文
     # fences[0]=第一个开, [1]=第一个闭, [2]=第二个开, [3]=第二个闭 → 正文在 [3]+3 之后
     fences = [m.start() for m in re.finditer(r"```", content)]
     if len(fences) >= 4:
-        return content[fences[3] + 3:].strip()
+        return content[fences[3] + 3 :].strip()
 
     # 去掉 [Thu 2026-04-02 18:19 GMT+8] OpenClaw runtime context ... 部分
     if "OpenClaw runtime context" in content:
@@ -230,9 +231,7 @@ def build_summary(conversation: str, oliver_messages: list = None) -> str:
     # 如果有 Oliver 原始消息，单独拼接这部分（行为偏好最重要）
     oliver_text = ""
     if oliver_messages:
-        oliver_text = "\n".join(
-            f"- {t[:300]}" for _, t, _ in oliver_messages
-        )
+        oliver_text = "\n".join(f"- {t[:300]}" for _, t, _ in oliver_messages)
 
     prompt = f"""从以下对话中提取 Oliver 的行为模式。不是任务内容，而是他如何提要求、如何做决策的风格特征。
 
@@ -245,7 +244,7 @@ def build_summary(conversation: str, oliver_messages: list = None) -> str:
 
 ---
 Oliver 原始消息：
-{oliver_text or '(无)'}
+{oliver_text or "(无)"}
 
 对话摘要：
 {conversation[:3000]}"""
@@ -257,20 +256,18 @@ Oliver 原始消息：
 
 # ── 数据库操作 ───────────────────────────────────────────────────────────────
 
+
 def disposition_exists(conn: sqlite3.Connection, session_id: str, agent: str) -> bool:
     """检查该 session 是否已有 disposition。"""
     row = conn.execute(
         "SELECT 1 FROM l1_dispositions WHERE l0_ref = ? AND source_agent = ? LIMIT 1",
-        (session_id, agent)
+        (session_id, agent),
     ).fetchone()
     return row is not None
 
 
 def save_dispositions(
-    session_id: str,
-    agent: str,
-    dispositions: list[dict],
-    conn: sqlite3.Connection
+    session_id: str, agent: str, dispositions: list[dict], conn: sqlite3.Connection
 ) -> int:
     """将 disposition 列表写入 l1_dispositions 表。返回写入条数。"""
     saved = 0
@@ -284,29 +281,33 @@ def save_dispositions(
             continue
 
         disp_id = f"disp_oc_{datetime.now().strftime('%Y%m%d%H%M%S')}_{hash(session_id) % 100000:05d}_{saved}"
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO l1_dispositions
             (id, l0_ref, condition_text, prediction_text,
              condition_embedding, prediction_embedding,
              confidence, source_agent, source_session_id, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            disp_id,
-            f"l0_{session_id}",  # l0_ref — 统一格式
-            d["condition"],
-            d["prediction"],
-            serialize_vec(cond_emb.tolist()),
-            serialize_vec(pred_emb.tolist()),
-            d.get("confidence", 1.0),
-            agent,
-            session_id,
-            now,
-        ))
+        """,
+            (
+                disp_id,
+                f"l0_{session_id}",  # l0_ref — 统一格式
+                d["condition"],
+                d["prediction"],
+                serialize_vec(cond_emb.tolist()),
+                serialize_vec(pred_emb.tolist()),
+                d.get("confidence", 1.0),
+                agent,
+                session_id,
+                now,
+            ),
+        )
         saved += 1
     return saved
 
 
 # ── 主流程 ───────────────────────────────────────────────────────────────────
+
 
 def process_agent(agent: str, dry_run: bool = False, batch_size: int = 5) -> dict:
     """处理单个 agent 的所有 session。返回统计。"""
@@ -314,20 +315,21 @@ def process_agent(agent: str, dry_run: bool = False, batch_size: int = 5) -> dic
     if not agent_dir.exists():
         return {"agent": agent, "skipped": 0, "processed": 0, "saved": 0, "errors": 0}
 
-    session_files = sorted(
-        agent_dir.glob("*.jsonl"),
-        key=lambda f: f.stat().st_size,
-        reverse=True
-    )
+    session_files = sorted(agent_dir.glob("*.jsonl"), key=lambda f: f.stat().st_size, reverse=True)
 
     # 过滤掉 reset/deleted 等备份文件
     session_files = [
-        f for f in session_files
-        if not any(x in f.name for x in [".reset.", ".deleted.", ".bak."])
+        f for f in session_files if not any(x in f.name for x in [".reset.", ".deleted.", ".bak."])
     ]
 
-    stats = {"agent": agent, "total": len(session_files),
-             "skipped": 0, "processed": 0, "saved": 0, "errors": 0}
+    stats = {
+        "agent": agent,
+        "total": len(session_files),
+        "skipped": 0,
+        "processed": 0,
+        "saved": 0,
+        "errors": 0,
+    }
 
     if dry_run:
         print(f"[{agent}] Dry run: 发现 {len(session_files)} 个会话")
@@ -341,8 +343,10 @@ def process_agent(agent: str, dry_run: bool = False, batch_size: int = 5) -> dic
     pending = [f for f in session_files if not disposition_exists(conn, f.stem, agent)]
     stats["skipped"] = len(session_files) - len(pending)
 
-    print(f"[{agent}] 总 {len(session_files)} 个会话，"
-          f"{stats['skipped']} 个已处理，{len(pending)} 个待处理（本次最多 {batch_size}）")
+    print(
+        f"[{agent}] 总 {len(session_files)} 个会话，"
+        f"{stats['skipped']} 个已处理，{len(pending)} 个待处理（本次最多 {batch_size}）"
+    )
 
     pending = pending[:batch_size]
 
@@ -372,9 +376,7 @@ def process_agent(agent: str, dry_run: bool = False, batch_size: int = 5) -> dic
             # Oliver 消息 >= 15 条时，直接用原始消息（不经过摘要）
             # 原因：摘要会丢失行为特异性，大段任务描述混入导致 LLM 无法聚焦
             if len(session_data["oliver_messages"]) >= 15:
-                summary = "\n".join(
-                    f"- {t[:300]}" for _, t, _ in session_data["oliver_messages"]
-                )
+                summary = "\n".join(f"- {t[:300]}" for _, t, _ in session_data["oliver_messages"])
             else:
                 summary = build_summary(conversation, session_data["oliver_messages"])
 
@@ -402,18 +404,23 @@ def process_agent(agent: str, dry_run: bool = False, batch_size: int = 5) -> dic
 
 def main():
     parser = argparse.ArgumentParser(description="OpenClaw 会话 → Hermem V4.2 Disposition")
-    parser.add_argument("--agent", "-a", choices=AGENTS, default=None,
-                        help="只处理指定 agent（默认全部）")
-    parser.add_argument("--dry", action="store_true",
-                        help="Dry run，不写 DB，只扫描文件")
-    parser.add_argument("--batch", "-b", type=int, default=5,
-                        help="每次处理的 session 数量（默认 5）")
+    parser.add_argument(
+        "--agent",
+        "-a",
+        choices=AGENTS,
+        default=None,
+        help="只处理指定 agent（默认全部）",
+    )
+    parser.add_argument("--dry", action="store_true", help="Dry run，不写 DB，只扫描文件")
+    parser.add_argument(
+        "--batch", "-b", type=int, default=5, help="每次处理的 session 数量（默认 5）"
+    )
     args = parser.parse_args()
 
     agents = [args.agent] if args.agent else AGENTS
     agents = [a for a in agents if a not in EXCLUDE_AGENTS]
 
-    print(f"=== OpenClaw → Hermem V4.2 Import ===")
+    print("=== OpenClaw → Hermem V4.2 Import ===")
     print(f"Agent: {agents if args.agent else '全部'}")
     print(f"Dry: {args.dry}")
     print(f"Batch: {args.batch}/agent")
@@ -430,7 +437,7 @@ def main():
         total_errors += stats["errors"]
 
     print()
-    print(f"=== 完成 ===")
+    print("=== 完成 ===")
     print(f"处理: {total_processed} 个会话")
     print(f"写入: {total_saved} 条 dispositions")
     print(f"错误: {total_errors}")

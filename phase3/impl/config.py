@@ -3,39 +3,40 @@
 Hermem Phase 3 - 共享配置与工具
 所有 impl 模块共享的常量、数据库路径、Ollama 客户端
 """
+
 import os
 from pathlib import Path
 
 # ── 路径 ────────────────────────────────────────────────────
 HERMES_HOME = Path.home() / ".hermes"
-MEMORY_DIR   = HERMES_HOME / "memory"
-L0_DIR       = MEMORY_DIR / "l0_raw"
-DB_PATH      = MEMORY_DIR / "l0_l3.db"
+MEMORY_DIR = HERMES_HOME / "memory"
+L0_DIR = MEMORY_DIR / "l0_raw"
+DB_PATH = MEMORY_DIR / "l0_l3.db"
 PROFILE_PATH = HERMES_HOME / "memory" / "user_profile.md"
 
 # ── Ollama ─────────────────────────────────────────────────
-OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://localhost:11434/v1")
-EMBED_MODEL  = "bge-m3:latest"       # 向量模型
-LLM_MODEL    = "qwen3.5:4b-no-think"   # Ollama LLM 统一模型
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/v1")
+EMBED_MODEL = "bge-m3:latest"  # 向量模型
+LLM_MODEL = "qwen3.5:4b-no-think"  # Ollama LLM 统一模型
 
 # ── L2 聚合同值 ────────────────────────────────────────────
-SIM_THRESHOLD_JOIN  = 0.75   # 新 L1 归入现有 scene
-SIM_THRESHOLD_MERGE = 0.85   # 两个 scene 合并
-SCENE_DORMANT_DAYS  = 60
+SIM_THRESHOLD_JOIN = 0.75  # 新 L1 归入现有 scene
+SIM_THRESHOLD_MERGE = 0.85  # 两个 scene 合并
+SCENE_DORMANT_DAYS = 60
 
 # ── B6: Disposition 衰减机制 ───────────────────────────────
-DISPOSITION_HALF_LIFE_DAYS = 7    # 半衰期 7 天
-DISPOSITION_MIN_COUNT       = 2   # 至少 2 次错误才增强
-DISPOSITION_MAX_FACTOR      = 2.0  # 最高增强到 2 倍
-DISPOSITION_BASE_WEIGHT     = 1.0 # 中性起点
+DISPOSITION_HALF_LIFE_DAYS = 7  # 半衰期 7 天
+DISPOSITION_MIN_COUNT = 2  # 至少 2 次错误才增强
+DISPOSITION_MAX_FACTOR = 2.0  # 最高增强到 2 倍
+DISPOSITION_BASE_WEIGHT = 1.0  # 中性起点
 # B8: ranking cap — error_count 超过此值时封顶，不再线性增长
-DISPOSITION_MAX_ERROR_COUNT = 5   # error_count 超过 5 则封顶（防止单个 disposition 垄断）
+DISPOSITION_MAX_ERROR_COUNT = 5  # error_count 超过 5 则封顶（防止单个 disposition 垄断）
 
 # ── L3 Staging 阈值 ─────────────────────────────────────────
-STAGING_CONFIRM_THRESHOLD = 5   # 满 5 条推一次确认
+STAGING_CONFIRM_THRESHOLD = 5  # 满 5 条推一次确认
 
 # ── Error Annotation ─────────────────────────────────────────
-ERROR_ANNOTATION_MODEL = "MiniMax-M2.7"   # 可切换到 qwen3.5:9b-q4_K_M 做对比实验
+ERROR_ANNOTATION_MODEL = "MiniMax-M2.7"  # 可切换到 qwen3.5:9b-q4_K_M 做对比实验
 
 ERROR_ANNOTATION_PROMPT = """你是一个严格的预测误差审计系统。请基于**对话原文中的明确内容**，逐条识别助手（Hermes）作出的**可被证伪的预测或隐含假设**，并与实际结果对比。
 

@@ -20,6 +20,7 @@ Hermem Phase 3 - Error Annotation 异步队列
     from .async_annotation import stop_worker
     stop_worker()
 """
+
 import json
 import queue
 import threading
@@ -29,15 +30,15 @@ from typing import Optional
 # ── 全局队列和工作线程 ───────────────────────────────────────────────────
 
 _annotation_queue: queue.Queue = queue.Queue()
-_worker_thread: Optional[threading.Thread] = None
+_worker_thread: threading.Thread | None = None
 _shutdown_flag = False
 
 
 def _worker():
     """后台工作线程：不断从队列取任务并执行 annotation"""
     # 延迟导入避免循环依赖
-    from .l0_store import annotate_l0_after_l1_v2 as _annotate
     from .config import ERROR_ANNOTATION_MODEL
+    from .l0_store import annotate_l0_after_l1_v2 as _annotate
 
     while not _shutdown_flag:
         try:
@@ -62,12 +63,13 @@ def _worker():
         try:
             # 幂等检查：优先查 L0 文件，再查 lightweight cache
             from .config import L0_DIR as _L0_DIR
+
             l0_path = Path(_L0_DIR) / f"{session_id}.json"
             if l0_path.exists():
                 with open(l0_path) as f:
                     data = json.load(f)
                 if "error_annotation" in data:
-                    continue   # 幂等跳过，finally 会调用 task_done()
+                    continue  # 幂等跳过，finally 会调用 task_done()
 
             annotation = _annotate(
                 session_id=session_id,
@@ -80,13 +82,18 @@ def _worker():
             elif annotation.get("prediction_errors"):
                 # V4.3 B1: 联动更新 disposition error_count
                 from .disposition_updater import update_dispositions_from_errors
+
                 updated = update_dispositions_from_errors(session_id, annotation)
                 if updated > 0:
                     print(f"[AsyncAnnotation] B1 更新了 {updated} 条 disposition error_count")
             else:
                 # V4.5: 无 prediction_errors → 累加 success_count
                 # 优先用精确 ID 匹配，fallback 到 session 匹配（V4.3 旧行为）
-                from .disposition_updater import increment_success_count, increment_success_by_ids
+                from .disposition_updater import (
+                    increment_success_by_ids,
+                    increment_success_count,
+                )
+
                 # 从 queue item 提取 active_disposition_ids（第 4 个元素，新格式）
                 active_ids = []
                 if len(item) >= 4:
@@ -94,11 +101,15 @@ def _worker():
                 if active_ids:
                     incremented = increment_success_by_ids(active_ids, session_id)
                     if incremented > 0:
-                        print(f"[AsyncAnnotation] V4.5 精确更新 {incremented} 条 disposition success_count（IDs）")
+                        print(
+                            f"[AsyncAnnotation] V4.5 精确更新 {incremented} 条 disposition success_count（IDs）"
+                        )
                 else:
                     incremented = increment_success_count(session_id)
                     if incremented > 0:
-                        print(f"[AsyncAnnotation] V4.5 回退累加 {incremented} 条 disposition success_count（session）")
+                        print(
+                            f"[AsyncAnnotation] V4.5 回退累加 {incremented} 条 disposition success_count（session）"
+                        )
         except Exception as e:
             print(f"[AsyncAnnotation] 异常: {session_id} - {e}")
         finally:
@@ -131,13 +142,14 @@ def drain_queue(n_workers: int = 4, timeout: int = 300):
     启动 N 个 worker 线程并行处理队列所有任务，最多等 timeout 秒。
     不依赖 Hermem 主进程的 context。
     """
-    import concurrent.futures, threading as _threading
+    import concurrent.futures
 
     _shutdown_flag = False  # reset for drain
 
     def _drain_worker(wid: int):
-        from .l0_store import annotate_l0_after_l1_v2 as _annotate
         from .config import ERROR_ANNOTATION_MODEL
+        from .l0_store import annotate_l0_after_l1_v2 as _annotate
+
         processed = 0
         while not _shutdown_flag:
             try:
@@ -155,6 +167,7 @@ def drain_queue(n_workers: int = 4, timeout: int = 300):
                 session_id, session_summary, l1_facts, active_disposition_ids = item
             try:
                 from .config import L0_DIR as _L0_DIR
+
                 l0_path = Path(_L0_DIR) / f"{session_id}.json"
                 if l0_path.exists():
                     with open(l0_path) as f:
@@ -170,14 +183,21 @@ def drain_queue(n_workers: int = 4, timeout: int = 300):
                 )
                 if annotation and annotation.get("prediction_errors"):
                     from .disposition_updater import update_dispositions_from_errors
+
                     update_dispositions_from_errors(session_id, annotation)
                 elif annotation:
                     # V4.5: 优先用精确 ID 匹配，fallback 到 session 匹配
-                    from .disposition_updater import increment_success_count, increment_success_by_ids
+                    from .disposition_updater import (
+                        increment_success_by_ids,
+                        increment_success_count,
+                    )
+
                     if active_disposition_ids:
                         updated = increment_success_by_ids(active_disposition_ids, session_id)
                         if updated > 0:
-                            print(f"[Drain w{wid}] V4.5 精确更新 {updated} 条 disposition success_count")
+                            print(
+                                f"[Drain w{wid}] V4.5 精确更新 {updated} 条 disposition success_count"
+                            )
                     else:
                         increment_success_count(session_id)
             except Exception as e:
@@ -190,7 +210,7 @@ def drain_queue(n_workers: int = 4, timeout: int = 300):
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
         futures = [pool.submit(_drain_worker, i) for i in range(n_workers)]
         concurrent.futures.wait(futures, timeout=timeout)
-    print(f"[Drain] Queue drained.")
+    print("[Drain] Queue drained.")
 
 
 def enqueue_annotation_lightweight(
@@ -209,6 +229,7 @@ def enqueue_annotation_lightweight(
 
 
 # ── 兼容旧接口（3-tuple: session_id, session_summary, l1_facts）─────────
+
 
 def enqueue_annotation(
     session_id: str,

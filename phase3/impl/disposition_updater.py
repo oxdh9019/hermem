@@ -27,13 +27,13 @@ from typing import Any
 
 from .config import DB_PATH
 
-
 # ── 阈值常量 ────────────────────────────────────────────────────
-EMBEDDING_THRESHOLD = 0.40   # Layer 3 fallback 阈值（0.40 以下相似度与随机无异）
-KEYWORD_MIN_OVERLAP = 2      # Layer 2 至少命中 2 个关键词
+EMBEDDING_THRESHOLD = 0.40  # Layer 3 fallback 阈值（0.40 以下相似度与随机无异）
+KEYWORD_MIN_OVERLAP = 2  # Layer 2 至少命中 2 个关键词
 
 
 # ── 工具函数 ────────────────────────────────────────────────────
+
 
 def extract_keywords(text: str) -> set[str]:
     """
@@ -44,26 +44,91 @@ def extract_keywords(text: str) -> set[str]:
         return set()
 
     stopwords = {
-        '的', '了', '是', '在', '我', '你', '他', '她', '它', '我们', '你们', '他们',
-        '这', '那', '有', '说', '也', '不', '就', '都', '啊', '呢', '吧', '吗', '哦',
-        '和', '与', '或', '但', '而', '着', '过', '被', '把', '给', '让', '向', '从',
-        'the', 'a', 'an', 'and', 'or', 'but', 'to', 'for', 'of', 'with', 'by', 'from',
-        'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
-        'i', 'you', 'he', 'she', 'it', 'we', 'they', 'what', 'which', 'that', 'this',
+        "的",
+        "了",
+        "是",
+        "在",
+        "我",
+        "你",
+        "他",
+        "她",
+        "它",
+        "我们",
+        "你们",
+        "他们",
+        "这",
+        "那",
+        "有",
+        "说",
+        "也",
+        "不",
+        "就",
+        "都",
+        "啊",
+        "呢",
+        "吧",
+        "吗",
+        "哦",
+        "和",
+        "与",
+        "或",
+        "但",
+        "而",
+        "着",
+        "过",
+        "被",
+        "把",
+        "给",
+        "让",
+        "向",
+        "从",
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "but",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "i",
+        "you",
+        "he",
+        "she",
+        "it",
+        "we",
+        "they",
+        "what",
+        "which",
+        "that",
+        "this",
     }
 
     # 中文 bigram + unigram
-    chinese_chars = re.findall(r'[\u4e00-\u9fff]+', text)
+    chinese_chars = re.findall(r"[\u4e00-\u9fff]+", text)
     chinese_words = set()
     for chunk in chinese_chars:
         for i in range(len(chunk)):
             if len(chunk[i]) > 0:
                 chinese_words.add(chunk[i].lower())
         for i in range(len(chunk) - 1):
-            chinese_words.add(chunk[i:i+2].lower())
+            chinese_words.add(chunk[i : i + 2].lower())
 
     # 英文分词
-    english_words = set(w.lower() for w in re.findall(r'[a-zA-Z]+', text))
+    english_words = {w.lower() for w in re.findall(r"[a-zA-Z]+", text)}
 
     all_words = chinese_words | english_words
     return {w for w in all_words if w not in stopwords and len(w) > 1}
@@ -77,13 +142,14 @@ def _update_error_count(db_path: Path, disp_id: str, now_iso: str) -> None:
         "SET error_count = error_count + 1, "
         "    last_error_at = ? "
         "WHERE id = ?",
-        (now_iso, disp_id)
+        (now_iso, disp_id),
     )
     conn.commit()
     conn.close()
 
 
 # ── 核心函数 ────────────────────────────────────────────────────
+
 
 def update_dispositions_from_errors(
     session_id: str,
@@ -128,7 +194,8 @@ def update_dispositions_from_errors(
         return 0
 
     # 预加载 condition_embedding 为 numpy 数组
-    from .utils import deserialize_vec, cosine_sim, get_embedding
+    from .utils import cosine_sim, deserialize_vec, get_embedding
+
     try:
         import numpy as _np
     except ImportError:
@@ -139,9 +206,7 @@ def update_dispositions_from_errors(
         emb_bytes = d["condition_embedding"]
         if emb_bytes:
             try:
-                disp_vecs[d["id"]] = _np.array(
-                    deserialize_vec(emb_bytes), dtype=_np.float64
-                )
+                disp_vecs[d["id"]] = _np.array(deserialize_vec(emb_bytes), dtype=_np.float64)
             except Exception:
                 disp_vecs[d["id"]] = None
         else:
@@ -169,7 +234,9 @@ def update_dispositions_from_errors(
                     match_reason = f"error_type={error_type}"
                     _update_error_count(db_path, matched_id, now_iso)
                     updated_count += 1
-                    print(f"  [L1 match] {match_reason}  disp={matched_id[:40]}  pred={model_pred[:40]}")
+                    print(
+                        f"  [L1 match] {match_reason}  disp={matched_id[:40]}  pred={model_pred[:40]}"
+                    )
                     break
 
         # ── Layer 2: 关键词交集匹配 ──
@@ -186,9 +253,13 @@ def update_dispositions_from_errors(
                     # 优先用 disposition.keywords，其次 condition_text + prediction_text
                     disp_keywords_raw = d["keywords"] or ""
                     if disp_keywords_raw:
-                        disp_kw = set(k.strip().lower() for k in disp_keywords_raw.split(',') if k.strip())
+                        disp_kw = {
+                            k.strip().lower() for k in disp_keywords_raw.split(",") if k.strip()
+                        }
                     else:
-                        disp_kw = extract_keywords((d["condition_text"] or "") + " " + (d["prediction_text"] or ""))
+                        disp_kw = extract_keywords(
+                            (d["condition_text"] or "") + " " + (d["prediction_text"] or "")
+                        )
 
                     overlap = len(error_kw & disp_kw)
                     if overlap >= KEYWORD_MIN_OVERLAP and overlap > best_overlap:
@@ -200,7 +271,9 @@ def update_dispositions_from_errors(
                     match_reason = f"keywords_overlap={best_overlap}"
                     _update_error_count(db_path, matched_id, now_iso)
                     updated_count += 1
-                    print(f"  [L2 match] {match_reason}  disp={matched_id[:40]}  pred={model_pred[:40]}")
+                    print(
+                        f"  [L2 match] {match_reason}  disp={matched_id[:40]}  pred={model_pred[:40]}"
+                    )
 
         # ── Layer 3: embedding 语义相似度 fallback ──
         if matched_id is None:
@@ -228,7 +301,9 @@ def update_dispositions_from_errors(
                     match_reason = f"embedding_sim={best_sim:.3f}"
                     _update_error_count(db_path, matched_id, now_iso)
                     updated_count += 1
-                    print(f"  [L3 match] {match_reason}  disp={matched_id[:40]}  pred={model_pred[:40]}")
+                    print(
+                        f"  [L3 match] {match_reason}  disp={matched_id[:40]}  pred={model_pred[:40]}"
+                    )
 
     return updated_count
 
@@ -245,12 +320,12 @@ def increment_success_count(session_id: str) -> int:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    now_iso = datetime.now().isoformat()
+    datetime.now().isoformat()
     cursor.execute(
         "UPDATE l1_dispositions "
         "SET success_count = success_count + 1 "
         "WHERE source_session_id = ? AND is_active = 1",
-        (session_id,)
+        (session_id,),
     )
     updated = cursor.rowcount
     conn.commit()
@@ -296,6 +371,7 @@ def increment_success_by_ids(disposition_ids: list[str], session_id: str) -> int
 
 # ── 工具函数 ────────────────────────────────────────────────────
 
+
 def _jaccard_sim(text1: str, text2: str) -> float:
     """
     混合 Jaccard 相似度：
@@ -324,6 +400,7 @@ def _jaccard_sim(text1: str, text2: str) -> float:
 
 
 # ── B6: Disposition 衰减机制 ──────────────────────────────────
+
 
 def compute_disposition_weight(
     last_error_at: str | None,
@@ -379,10 +456,10 @@ def update_disposition_weights(
     Returns: {"updated": N, "weights": {id: weight, ...}}
     """
     from .config import (
-        DISPOSITION_HALF_LIFE_DAYS,
-        DISPOSITION_MIN_COUNT,
-        DISPOSITION_MAX_FACTOR,
         DISPOSITION_BASE_WEIGHT,
+        DISPOSITION_HALF_LIFE_DAYS,
+        DISPOSITION_MAX_FACTOR,
+        DISPOSITION_MIN_COUNT,
     )
 
     half_life = half_life_days or DISPOSITION_HALF_LIFE_DAYS
@@ -392,9 +469,7 @@ def update_disposition_weights(
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    cursor.execute(
-        "SELECT id, last_error_at, error_count FROM l1_dispositions WHERE is_active = 1"
-    )
+    cursor.execute("SELECT id, last_error_at, error_count FROM l1_dispositions WHERE is_active = 1")
     rows = cursor.fetchall()
 
     results = {}
@@ -425,7 +500,8 @@ def update_disposition_weights(
 # ── 测试 ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import json, sys
+    import json
+    import sys
 
     print("=== Disposition Updater 自测 ===\n")
 
@@ -459,12 +535,15 @@ if __name__ == "__main__":
     # 验证 DB 结果
     print("\n=== 更新后 l1_dispositions 状态 ===")
     from .utils import db_query_dict
+
     rows = db_query_dict(
         "SELECT id, prediction_text, error_count, success_count, last_error_at "
         "FROM l1_dispositions WHERE is_active = 1"
     )
     for r in rows:
         pred_short = (r["prediction_text"] or "")[:40]
-        print(f"  [{r['id'][:8]}] pred={pred_short!r}  errors={r['error_count']}  success={r['success_count']}  last_err={r['last_error_at']}")
+        print(
+            f"  [{r['id'][:8]}] pred={pred_short!r}  errors={r['error_count']}  success={r['success_count']}  last_err={r['last_error_at']}"
+        )
 
     print("\n✓ 自测完成")

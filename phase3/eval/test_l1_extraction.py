@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """验证 qwen3.5:2b 在真实 session 上的 L1 extraction 效果。"""
-import sys, os, json
+
+import json
+import os
+import sys
+
 sys.path.insert(0, os.path.expanduser("~/.hermes/projects/hermem-github/phase3"))
 
-from impl.utils import llm_generate
 from impl.config import L1_EXTRACT_PROMPT
+from impl.utils import llm_generate
 
 SESSION_PATH = os.path.expanduser("~/.hermes/sessions/session_20260521_114059_ded70a.json")
 
@@ -27,8 +31,14 @@ summary_parts = []
 for idx, m in user_msgs:
     user_content = m.get("content", "")[:300].replace("\n", " ")
     # Find next assistant message
-    next_assistant = next((messages[i].get("content", "")[:200] for i in range(idx+1, len(messages))
-                          if messages[i].get("role") == "assistant"), "(no response)")
+    next_assistant = next(
+        (
+            messages[i].get("content", "")[:200]
+            for i in range(idx + 1, len(messages))
+            if messages[i].get("role") == "assistant"
+        ),
+        "(no response)",
+    )
     next_assistant = next_assistant.replace("\n", " ")[:200]
     summary_parts.append(f"User: {user_content}\nAssistant: {next_assistant}")
 
@@ -39,6 +49,7 @@ print("Running L1 extraction with qwen3.5:2b...")
 prompt = L1_EXTRACT_PROMPT.format(SESSION_SUMMARY=session_summary)
 
 import time
+
 t0 = time.time()
 result = llm_generate(prompt, model="qwen3.5:2b", temperature=0.2, max_tokens=1024)
 latency = time.time() - t0
@@ -51,6 +62,7 @@ print()
 
 # Parse JSON
 import re
+
 try:
     # Try code block first
     m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", result, re.DOTALL)

@@ -3,6 +3,7 @@
 Hermem Phase 3 - 数据库初始化
 Step 0: 创建 l0_l3.db 及三张表（L1/L2/L3 staging）
 """
+
 import sqlite3
 from pathlib import Path
 
@@ -114,8 +115,10 @@ _conn.close()
 
 # Verify
 conn2 = sqlite3.connect(DB)
-tables = [r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
-views  = [r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='view'").fetchall()]
+tables = [
+    r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+]
+views = [r[0] for r in conn2.execute("SELECT name FROM sqlite_master WHERE type='view'").fetchall()]
 conn2.close()
 
 print(f"✓ l0_l3.db initialized at {DB}")

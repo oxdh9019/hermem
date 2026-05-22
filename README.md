@@ -14,7 +14,7 @@ Hermes lightweight memory enhancement system — L0–L3 hierarchical memory wit
 | **V4.4** | **Concurrency Fixes** | Vectorstore double-lock, auto_index file lock, watchdog drift monitor |
 | **V4.5** | **Disposition-Aware Rerank** | Boost L1 facts via disposition context — error_count now drives retrieval ranking |
 
-> **V4.5 is active** (2026-05-22). `disposition_aware_rerank()` — disposition context boosts L1 fact retrieval via l0_ref match + condition keyword fallback. Boost log → `~/.hermes/logs/hermem-boost.jsonl`. error_count → behavior closed loop.
+> **V4.5 is active** (2026-05-23). 15 Fixes merged — schema complete, SQL injection closed, annotation pipeline end-to-end verified, precise success matching. `disposition_aware_rerank()` boosts L1 fact retrieval via disposition context.
 
 ---
 
@@ -267,6 +267,35 @@ python3 phase3/cron_daily.py
 
 ## Changelog
 
+### 2026-05-23 — V4.5 Patch (15 Fixes)
+
+**`origin/main` → `6e05d22`** (all pushed):
+
+| Fix | Area | Description |
+|-----|------|-------------|
+| 1 | Schema | `db_init.py` CREATE TABLE 补全 source_agent/scope/weight/intent 四列 |
+| 1b | Migration | `scripts/migrate_add_disposition_columns.py` 一次性迁移脚本（含 scope DEFAULT） |
+| 1c | Cleanup | `generate_dispositions_from_annotations.py` 删除冗余 ALTER TABLE 块 |
+| 2 | Bug | `process_turn_judgments.py` JSON regex fallback 缩进错误导致 `return []` 误执行 |
+| 3 | Schema | `v4_2_migrate.py` INSERT 补四列 + 日期格式修复 + l0_ref 格式化为 `l0_{session_id}` |
+| 4 | Weight | `cron_daily.py` 每次 L1 batch 后调用 `update_disposition_weights()` 触发 weight 重算 |
+| 7 | l0_ref | `openclaw_import.py` l0_ref 统一为 `l0_{session_id}` 格式 |
+| 8 | Perf | `l1_search.py` Boost 日志从"每次新 Thread"→ 单线程队列消费 |
+| 9 | SQL | `daily_synthesis.py` SQL 加 `error_count >= 2` 过滤（Python 侧已有，SQL 补漏） |
+| 10 | Cache | `process_turn_judgments.py` FactCache max_size 5→500 |
+| 11 | Security | `backfill_vectors.py` f-string CASE WHEN → 临时表 + executemany 参数化 |
+| 11b | Security | `backfill_vectors.py` vec_index >= 参数化 |
+| 12 | Lock | `backfill_vectors.py` 失效 `acquire_lock()` → `fcntl.flock` FileLock |
+| 13 | Atomicity | `vectorstore.py` `shutil.copy2` → `os.replace`（原子写入） |
+| 14 | Embedding | `l2_aggregate.py` L2 scene 合并时重算 scene_embedding（加权平均） |
+| 15 | Bug | `journal.py` `--date` 参数 now works（`fetch_session_summaries()` 接受 date 参数） |
+| Fix 6 | Precise match | `async_annotation.py` 4-tuple 格式 + `increment_success_by_ids()` 精确 success 匹配 |
+
+**hermes-agent** (`4f4c7c137`, local only):
+- `_run()` prefetch + `_recall_dispositions_for_correction()` 补上 `_last_activated_disposition_ids` 提取，使 Fix 6 端到端生效
+
+---
+
 ### 2026-05-22 — V4.3.1 Patch
 
 **hermem repo** (`d63f663`, pushed to `origin/main`):
@@ -288,6 +317,7 @@ python3 phase3/cron_daily.py
 |-------|-------|---------------|
 | **B3 is_recurring_cross_session** | Dynamic threshold blocked — success_count=0 from annotation-only data. B3 bypass via satisfaction check (V4.4 Plan B) — no dynamic threshold needed yet. | More satisfaction check data |
 | **V4.5 keyword threshold tuning** | `MIN_HITS=2` is conservative. After 1-2 weeks of boost log data, tighten to `max(2, ceil(n_keywords*0.4))` or add `trigger_keywords` field. | Boost log analysis |
+| **Fix 6 annotation pipeline** | Precise success matching via `active_disposition_ids` — V4.5 end-to-end now verified. | Live data validation |
 
 ## Caveats
 

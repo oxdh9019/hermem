@@ -3,6 +3,7 @@
 Hermem Phase 3 - 统一入口
 通过 `python -m impl.run <session_id>` 调用完整流程，或直接导入各模块。
 """
+
 import sys
 from pathlib import Path
 
@@ -10,14 +11,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from . import config
-from .l0_store import save_l0_raw, load_l0_detail, enforce_l0_quota
+from .l0_store import enforce_l0_quota, load_l0_detail, save_l0_raw
 from .l1_extract import extract_l1_facts, store_l1_batch
-from .l1_search import vector_search_l1, retrieve
-from .l2_aggregate import try_aggregate_l2, check_scene_dormancy, merge_duplicate_scenes
+from .l1_search import retrieve, vector_search_l1
+from .l2_aggregate import check_scene_dormancy, merge_duplicate_scenes, try_aggregate_l2
 from .l3_staging import (
-    stage_preference, get_pending_preferences,
-    process_l3_staging, confirm_preference, reject_preference,
     batch_stage_from_l1,
+    confirm_preference,
+    get_pending_preferences,
+    process_l3_staging,
+    reject_preference,
+    stage_preference,
 )
 
 
@@ -43,6 +47,7 @@ def process_session(
         dict，含各步骤状态和结果统计
     """
     import time  # noqa: F401 (reserved for future duration tracking)
+
     stats = {}
 
     # 1. L0 保存
@@ -61,7 +66,7 @@ def process_session(
     stats["fact_ids"] = fact_ids
 
     # 4. L2 聚合（基于写入后的完整 fact 对象）
-    written_facts = [{**f, "id": fid} for f, fid in zip(facts, fact_ids)]
+    written_facts = [{**f, "id": fid} for f, fid in zip(facts, fact_ids, strict=False)]
     try_aggregate_l2(written_facts)
 
     # 5. L3 staging（提取 preference）
@@ -75,6 +80,7 @@ def process_session(
     #    使用 enqueue 而非同步调用，避免 LLM 延迟阻塞用户响应
     #    active_disposition_ids: V4.5 精确 success 匹配所需的上下文
     from .async_annotation import enqueue_annotation
+
     qsize = enqueue_annotation(
         session_id=session_id,
         session_summary=session_summary,
@@ -96,7 +102,9 @@ if __name__ == "__main__":
         summary = sys.argv[1]
         sid = f"cli_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         print(f"Processing session {sid} with summary: {summary[:80]}...")
-        result = process_session(sid, [], datetime.now().isoformat(), datetime.now().isoformat(), summary)
+        result = process_session(
+            sid, [], datetime.now().isoformat(), datetime.now().isoformat(), summary
+        )
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print("Usage: python -m impl.run <session_summary_text>")

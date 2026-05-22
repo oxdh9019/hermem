@@ -7,12 +7,11 @@
 - FTS5 索引维护
 """
 
-import sqlite3
 import json
-import os
+import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
-from contextlib import contextmanager
 
 # ── 路径配置 ────────────────────────────────────────────
 HERMEM_DIR = Path.home() / ".hermes" / "memory"
@@ -22,7 +21,7 @@ DB_PATH = HERMEM_DIR / "hermem.db"
 
 
 # ── 数据库连接（单例） ───────────────────────────────────
-_conn: Optional[sqlite3.Connection] = None
+_conn: sqlite3.Connection | None = None
 
 
 def get_conn() -> sqlite3.Connection:
@@ -101,14 +100,15 @@ def init_db():
 
 # ── Chunks 表操作 ───────────────────────────────────────
 
+
 def insert_chunk(
     session_id: str,
     content: str,
     chunk_type: str,
     concepts: list[str],
-    source_file: Optional[str] = None,
-    source_line: Optional[int] = None,
-    vec_index: Optional[int] = None,
+    source_file: str | None = None,
+    source_line: int | None = None,
+    vec_index: int | None = None,
 ) -> int:
     """插入一条记忆片段。
 
@@ -116,19 +116,22 @@ def insert_chunk(
         chunk_id (int): 新插入记录的 id。
     """
     with get_db() as conn:
-        cur = conn.execute("""
+        cur = conn.execute(
+            """
             INSERT INTO chunks
                 (session_id, content, chunk_type, concepts, source_file, source_line, vec_index)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            session_id,
-            content,
-            chunk_type,
-            json.dumps(concepts, ensure_ascii=False),
-            source_file,
-            source_line,
-            vec_index,
-        ))
+        """,
+            (
+                session_id,
+                content,
+                chunk_type,
+                json.dumps(concepts, ensure_ascii=False),
+                source_file,
+                source_line,
+                vec_index,
+            ),
+        )
         chunk_id = cur.lastrowid
 
         # 同步 FTS5 索引
@@ -140,12 +143,10 @@ def insert_chunk(
     return chunk_id
 
 
-def get_chunk_by_id(chunk_id: int) -> Optional[dict]:
+def get_chunk_by_id(chunk_id: int) -> dict | None:
     """根据 id 查询单条记忆。"""
     with get_db() as conn:
-        row = conn.execute(
-            "SELECT * FROM chunks WHERE id = ?", (chunk_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM chunks WHERE id = ?", (chunk_id,)).fetchone()
         if row is None:
             return None
         return _row_to_dict(row)
@@ -156,7 +157,7 @@ def get_chunks_by_session(session_id: str) -> list[dict]:
     with get_db() as conn:
         rows = conn.execute(
             "SELECT * FROM chunks WHERE session_id = ? ORDER BY created_at",
-            (session_id,)
+            (session_id,),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
 
@@ -166,7 +167,7 @@ def get_chunks_by_type(chunk_type: str, limit: int = 100) -> list[dict]:
     with get_db() as conn:
         rows = conn.execute(
             "SELECT * FROM chunks WHERE chunk_type = ? ORDER BY created_at DESC LIMIT ?",
-            (chunk_type, limit)
+            (chunk_type, limit),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
 
@@ -181,7 +182,7 @@ def search_chunks_by_text(keyword: str, limit: int = 20) -> list[dict]:
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (f"%{keyword}%", limit)
+            (f"%{keyword}%", limit),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
 
@@ -201,12 +202,12 @@ def get_chunk_count() -> int:
 
 # ── Embedding Cache ──────────────────────────────────────
 
-def get_cached_embedding(text_hash: str) -> Optional[bytes]:
+
+def get_cached_embedding(text_hash: str) -> bytes | None:
     """查询缓存的 embedding（返回原始 BLOB）。"""
     with get_db() as conn:
         row = conn.execute(
-            "SELECT embedding FROM embedding_cache WHERE text_hash = ?",
-            (text_hash,)
+            "SELECT embedding FROM embedding_cache WHERE text_hash = ?", (text_hash,)
         ).fetchone()
         return row[0] if row else None
 
@@ -214,10 +215,13 @@ def get_cached_embedding(text_hash: str) -> Optional[bytes]:
 def set_cached_embedding(text_hash: str, embedding_blob: bytes):
     """写入 embedding 缓存。"""
     with get_db() as conn:
-        conn.execute("""
+        conn.execute(
+            """
             INSERT OR REPLACE INTO embedding_cache (text_hash, embedding, created_at)
             VALUES (?, ?, julianday('now'))
-        """, (text_hash, embedding_blob))
+        """,
+            (text_hash, embedding_blob),
+        )
 
 
 def get_cache_stats() -> dict:
@@ -228,6 +232,7 @@ def get_cache_stats() -> dict:
 
 
 # ── 工具函数 ────────────────────────────────────────────
+
 
 def rows_to_dicts(rows) -> list[dict]:
     """将 fetchall() 结果批量转为 dict 列表。兼容 sqlite3.Row 和普通 tuple。"""

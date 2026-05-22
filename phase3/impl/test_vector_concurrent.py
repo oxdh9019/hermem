@@ -13,18 +13,15 @@ test_vector_concurrent.py — 多进程并发写入测试
 
 import json
 import multiprocessing
-import os
 import random
-import subprocess
 import sys
-import time
 from pathlib import Path
 
-HERMEM   = Path.home() / ".hermes"
-IMPL_PY  = Path(__file__).resolve().parent
-SCRIPT   = IMPL_PY / "_concurrent_worker.py"
+HERMEM = Path.home() / ".hermes"
+IMPL_PY = Path(__file__).resolve().parent
+SCRIPT = IMPL_PY / "_concurrent_worker.py"
 
-NPY_PATH  = HERMEM / "memory" / "hermem_vectors.npy"
+NPY_PATH = HERMEM / "memory" / "hermem_vectors.npy"
 META_PATH = HERMEM / "memory" / "hermem_meta.json"
 
 
@@ -41,6 +38,7 @@ def get_state():
 def worker(batch_size: int, idx: int, lock_fd: int):
     """子进程入口：调用 append_vectors。"""
     import sys
+
     sys.path.insert(0, str(IMPL_PY.parent))
     from impl.vectorstore import append_vectors
 
@@ -64,12 +62,12 @@ def run_test(num_procs: int, batch_size: int, repeats: int = 3) -> bool:
         for p in procs:
             p.start()
         for p in procs:
-            p.join(timeout=30)   # 每个子进程最多等 30s
+            p.join(timeout=30)  # 每个子进程最多等 30s
 
         # 检查是否有子进程未退出
         alive = [p for p in procs if p.is_alive()]
         if alive:
-            print(f"  rep {rep+1}: {len(alive)} processes still alive — TIMEOUT")
+            print(f"  rep {rep + 1}: {len(alive)} processes still alive — TIMEOUT")
             for p in alive:
                 p.terminate()
             all_ok = False
@@ -79,21 +77,21 @@ def run_test(num_procs: int, batch_size: int, repeats: int = 3) -> bool:
         state_after = get_state()
         meta_after, npy_after = state_after
         expected_new = num_procs * batch_size
-        actual_meta_inc  = meta_after  - meta_before
-        actual_npy_inc  = npy_after   - npy_before
+        actual_meta_inc = meta_after - meta_before
+        actual_npy_inc = npy_after - npy_before
         drift = meta_after - npy_after
 
-        ok = (actual_meta_inc == expected_new and
-              actual_npy_inc  == expected_new and
-              drift == 0)
+        ok = actual_meta_inc == expected_new and actual_npy_inc == expected_new and drift == 0
         status = "PASS" if ok else "FAIL"
         if not ok:
             all_ok = False
 
-        print(f"  rep {rep+1}: "
-              f"meta +{actual_meta_inc}/{expected_new}, "
-              f"npy  +{actual_npy_inc}/{expected_new}, "
-              f"drift={drift} → {status}")
+        print(
+            f"  rep {rep + 1}: "
+            f"meta +{actual_meta_inc}/{expected_new}, "
+            f"npy  +{actual_npy_inc}/{expected_new}, "
+            f"drift={drift} → {status}"
+        )
     return all_ok
 
 
@@ -103,7 +101,7 @@ def main():
     print("=" * 60)
 
     state = get_state()
-    print(f"\n初始: meta_next={state[0]}, npy_rows={state[1]}, drift={state[0]-state[1]}")
+    print(f"\n初始: meta_next={state[0]}, npy_rows={state[1]}, drift={state[0] - state[1]}")
 
     # Test 1: 3 processes × 5 vectors
     print("\n[Test 1] 3 processes × 5 vectors × 3 repeats")
@@ -118,8 +116,10 @@ def main():
     ok3 = run_test(num_procs=10, batch_size=2, repeats=3)
 
     state_final = get_state()
-    print(f"\n最终: meta_next={state_final[0]}, npy_rows={state_final[1]}, "
-          f"drift={state_final[0]-state_final[1]}")
+    print(
+        f"\n最终: meta_next={state_final[0]}, npy_rows={state_final[1]}, "
+        f"drift={state_final[0] - state_final[1]}"
+    )
 
     overall = ok1 and ok2 and ok3 and (state_final[0] - state_final[1]) == 0
     print(f"\nOverall: {'ALL PASS ✅' if overall else 'SOME FAILED ❌'}")

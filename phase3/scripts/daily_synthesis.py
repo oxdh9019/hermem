@@ -6,18 +6,18 @@ Daily Synthesis for Hermem V4.3
 - 识别 recurring patterns，生成 active_learnings.md
 - 供下一轮 system prompt 加载
 """
+
 import json
 import sqlite3
+from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from collections import defaultdict
-from typing import Dict, List, Any
 
 # ── 路径配置 ─────────────────────────────────────────────────────────
 HERMES_ROOT = Path.home() / ".hermes"
-MEMORY_DIR  = HERMES_ROOT / "memory"
-L0_DIR      = MEMORY_DIR / "l0_raw"
-DB_PATH     = MEMORY_DIR / "l0_l3.db"          # l1_dispositions 所在 DB
+MEMORY_DIR = HERMES_ROOT / "memory"
+L0_DIR = MEMORY_DIR / "l0_raw"
+DB_PATH = MEMORY_DIR / "l0_l3.db"  # l1_dispositions 所在 DB
 OUTPUT_PATH = HERMES_ROOT / "active_learnings_daily.md"
 
 # 时间窗口（小时）
@@ -26,7 +26,8 @@ LOOKBACK_HOURS = 24
 
 # ── 数据收集 ─────────────────────────────────────────────────────────
 
-def get_recent_annotations(since: datetime) -> List[Dict]:
+
+def get_recent_annotations(since: datetime) -> list[dict]:
     """
     扫描 L0 JSON，提取 error_annotation 中 annotated_at >= since 的记录。
     annotated_at 位于 error_annotation 内部（不是顶层）。
@@ -52,21 +53,23 @@ def get_recent_annotations(since: datetime) -> List[Dict]:
         session_id = data.get("session_id", l0_file.stem)
 
         for err in ann.get("prediction_errors", []):
-            recent.append({
-                "session_id":      session_id,
-                "error_type":      err.get("error_type", "other"),
-                "model_prediction": err.get("model_prediction", ""),
-                "actual_outcome":  err.get("actual_outcome", ""),
-                "is_recurring":    err.get("is_recurring", False),   # V4 prompt 新字段
-                "timestamp":       ann_time,
-                "severity":        err.get("severity", "medium"),
-                "confidence":       err.get("confidence", 0.5),
-            })
+            recent.append(
+                {
+                    "session_id": session_id,
+                    "error_type": err.get("error_type", "other"),
+                    "model_prediction": err.get("model_prediction", ""),
+                    "actual_outcome": err.get("actual_outcome", ""),
+                    "is_recurring": err.get("is_recurring", False),  # V4 prompt 新字段
+                    "timestamp": ann_time,
+                    "severity": err.get("severity", "medium"),
+                    "confidence": err.get("confidence", 0.5),
+                }
+            )
 
     return recent
 
 
-def get_high_error_dispositions(since: datetime) -> List[Dict]:
+def get_high_error_dispositions(since: datetime) -> list[dict]:
     """
     从 l1_dispositions 表取过去 24h 内有 last_error_at 更新的记录，
     且 error_count >= 2（高频出错）。
@@ -76,7 +79,8 @@ def get_high_error_dispositions(since: datetime) -> List[Dict]:
     cursor = conn.cursor()
 
     since_iso = since.isoformat()
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT id, error_type, condition_text, prediction_text,
                error_count, success_count, last_error_at
         FROM l1_dispositions
@@ -85,7 +89,9 @@ def get_high_error_dispositions(since: datetime) -> List[Dict]:
           AND scope = 'model_error'
           AND error_count >= 2
         ORDER BY error_count DESC
-    """, (since_iso,))
+    """,
+        (since_iso,),
+    )
 
     rows = [dict(row) for row in cursor.fetchall()]
     conn.close()
@@ -94,15 +100,15 @@ def get_high_error_dispositions(since: datetime) -> List[Dict]:
 
 # ── 分析 ──────────────────────────────────────────────────────────────
 
-def cluster_by_error_type(annotations: List[Dict]) -> Dict[str, List[Dict]]:
+
+def cluster_by_error_type(annotations: list[dict]) -> dict[str, list[dict]]:
     clusters = defaultdict(list)
     for ann in annotations:
         clusters[ann["error_type"]].append(ann)
     return clusters
 
 
-def build_summary(annotations: List[Dict],
-                  dispositions: List[Dict]) -> tuple[str, str]:
+def build_summary(annotations: list[dict], dispositions: list[dict]) -> tuple[str, str]:
     """
     返回 (recurring_section, disposition_section)
     """
@@ -112,30 +118,27 @@ def build_summary(annotations: List[Dict],
     recurring_lines = []
     recurring_lines.append("## 🔁 Recurring Error Patterns (last 24h)\n")
 
-    sorted_types = sorted(clusters.items(),
-                          key=lambda x: len(x[1]), reverse=True)
+    sorted_types = sorted(clusters.items(), key=lambda x: len(x[1]), reverse=True)
 
     has_patterns = False
     for error_type, items in sorted_types:
-        count          = len(items)
+        count = len(items)
         recurring_true = sum(1 for i in items if i.get("is_recurring"))
         if count >= 2 or recurring_true > 0:
             has_patterns = True
             recurring_lines.append(
                 f"**`{error_type}`** — {count}次出现，{recurring_true}次标注为recurring"
             )
-            for i, item in enumerate(items[:2]):
+            for _i, item in enumerate(items[:2]):
                 pred = item["model_prediction"][:120]
-                sev  = item["severity"]
+                sev = item["severity"]
                 recurring_lines.append(
                     f"  - [{sev}] {pred}{'…' if len(item['model_prediction']) > 120 else ''}"
                 )
             recurring_lines.append("")
 
     if not has_patterns:
-        recurring_lines.append(
-            "No recurring patterns detected in the last 24h.\n"
-        )
+        recurring_lines.append("No recurring patterns detected in the last 24h.\n")
 
     recurring_section = "\n".join(recurring_lines)
 
@@ -170,21 +173,20 @@ def build_summary(annotations: List[Dict],
     return recurring_section, disposition_section
 
 
-def generate_rules(clusters: Dict[str, List[Dict]]) -> str:
+def generate_rules(clusters: dict[str, list[dict]]) -> str:
     """从高频 pattern 生成 one-liner watch rules。"""
     lines = []
     lines.append("## 📌 Watch Rules (auto-generated)\n")
 
     has_rules = False
-    for error_type, items in sorted(clusters.items(),
-                                    key=lambda x: len(x[1]), reverse=True):
+    for error_type, items in sorted(clusters.items(), key=lambda x: len(x[1]), reverse=True):
         if len(items) >= 2:
             has_rules = True
             example = items[0]["model_prediction"][:100]
             lines.append(
                 f"- When processing a task that might involve "
                 f"`{error_type}`, double-check your assumption before acting. "
-                f"Recent pattern: \"{example}…\""
+                f'Recent pattern: "{example}…"'
             )
 
     if not has_rules:
@@ -195,12 +197,13 @@ def generate_rules(clusters: Dict[str, List[Dict]]) -> str:
 
 # ── 主流程 ────────────────────────────────────────────────────────────
 
+
 def main():
     since = datetime.now() - timedelta(hours=LOOKBACK_HOURS)
     print(f"[daily_synthesis] lookback: {since.strftime('%Y-%m-%d %H:%M')}")
 
     # 1. collect
-    annotations  = get_recent_annotations(since)
+    annotations = get_recent_annotations(since)
     dispositions = get_high_error_dispositions(since)
 
     print(f"  annotations: {len(annotations)} prediction errors")
@@ -211,8 +214,8 @@ def main():
         return
 
     # 2. build sections
-    recurring_sec,  disposition_sec = build_summary(annotations, dispositions)
-    rules_sec                    = generate_rules(cluster_by_error_type(annotations))
+    recurring_sec, disposition_sec = build_summary(annotations, dispositions)
+    rules_sec = generate_rules(cluster_by_error_type(annotations))
 
     # 3. assemble
     today = datetime.now().strftime("%Y-%m-%d")
@@ -242,9 +245,11 @@ def main():
 
     # 4. quick summary to stdout
     total_errors = len(annotations)
-    unique_types = len(set(a["error_type"] for a in annotations))
-    print(f"  Summary: {total_errors} errors, {unique_types} types, "
-          f"{len(dispositions)} disposition updates")
+    unique_types = len({a["error_type"] for a in annotations})
+    print(
+        f"  Summary: {total_errors} errors, {unique_types} types, "
+        f"{len(dispositions)} disposition updates"
+    )
 
 
 if __name__ == "__main__":

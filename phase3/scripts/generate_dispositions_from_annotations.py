@@ -26,9 +26,8 @@ import numpy as np
 # 添加 phase3 到 path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from impl.config import DB_PATH, L0_DIR, OLLAMA_URL, ERROR_ANNOTATION_MODEL
-from impl.utils import llm_generate, get_embedding
-
+from impl.config import DB_PATH, ERROR_ANNOTATION_MODEL, L0_DIR
+from impl.utils import get_embedding, llm_generate
 
 PROMPT_TEMPLATE = """你是一个错误模式分析专家。基于以下对话中的预测误差（error_annotation），
 生成一个可用于记忆系统的 disposition（条件-预测对）。
@@ -84,7 +83,7 @@ def generate_disposition(annotation: dict) -> dict | None:
             text = text[4:]
         text = text.strip().strip("`")
 
-    match = re.search(r'\{[\s\S]*\}', text)
+    match = re.search(r"\{[\s\S]*\}", text)
     if not match:
         print(f"  [JSON 解析失败] 原始响应: {text[:100]}")
         return None
@@ -143,26 +142,29 @@ def main():
         try:
             new_id = f"disp_hm_{datetime.now().strftime('%Y%m%d%H%M%S')}_{cursor.lastrowid}"
             now = datetime.now().isoformat()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO l1_dispositions
                     (id, condition_text, prediction_text, error_type, keywords,
                      confidence, source_session_id, source_agent, is_active,
                      scope, created_at, condition_embedding)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                new_id,
-                disp.get("condition_text", ""),
-                disp.get("prediction_text", ""),
-                disp.get("error_type", "other"),
-                disp.get("keywords", ""),
-                disp.get("confidence", 0.8),
-                disp["source_session_id"],
-                disp["source_agent"],
-                disp["is_active"],
-                disp.get("scope", "model_error"),
-                now,
-                None,  # condition_embedding filled below
-            ))
+            """,
+                (
+                    new_id,
+                    disp.get("condition_text", ""),
+                    disp.get("prediction_text", ""),
+                    disp.get("error_type", "other"),
+                    disp.get("keywords", ""),
+                    disp.get("confidence", 0.8),
+                    disp["source_session_id"],
+                    disp["source_agent"],
+                    disp["is_active"],
+                    disp.get("scope", "model_error"),
+                    now,
+                    None,  # condition_embedding filled below
+                ),
+            )
             # Generate embedding for condition_text
             cond_text = disp.get("condition_text", "")
             if cond_text:
@@ -170,7 +172,7 @@ def main():
                 emb_bytes = np.array(emb, dtype=np.float32).tobytes()
                 cursor.execute(
                     "UPDATE l1_dispositions SET condition_embedding=? WHERE id=?",
-                    (emb_bytes, new_id)
+                    (emb_bytes, new_id),
                 )
             added += 1
             print(f"  → 新增: {disp.get('condition_text', '')[:60]}")

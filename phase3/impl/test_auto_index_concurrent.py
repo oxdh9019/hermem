@@ -8,18 +8,16 @@ Test 2: INDEX_LOCK_FILE 文件锁代码存在且正确 (P1)
 
 import json
 import multiprocessing
-import numpy as np
-import os
 import shutil
-import sqlite3
 import subprocess
 import sys
-import time
 from pathlib import Path
 
+import numpy as np
+
 # ── 测试路径 ──────────────────────────────────────────────
-TEST_DIR  = Path("/tmp/hermem_p1_test")
-VEC_PATH  = TEST_DIR / "vectors.npy"
+TEST_DIR = Path("/tmp/hermem_p1_test")
+VEC_PATH = TEST_DIR / "vectors.npy"
 META_PATH = TEST_DIR / "meta.json"
 LOCK_PATH = TEST_DIR / ".index.lock"
 
@@ -28,8 +26,7 @@ LOCK_PATH = TEST_DIR / ".index.lock"
 def _vec_worker(script: str):
     """在独立进程中执行向量写入脚本。"""
     result = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True, text=True, timeout=20
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=20
     )
     if result.returncode != 0:
         print(f"  stderr: {result.stderr[:300]}")
@@ -84,7 +81,7 @@ finally:
 
     N = 8
     procs = []
-    for i in range(N):
+    for _i in range(N):
         p = multiprocessing.Process(target=_vec_worker, args=(worker_script_template,))
         procs.append(p)
 
@@ -100,7 +97,7 @@ finally:
     drift = meta["next_index"] - vecs.shape[0]
     alive = [p for p in procs if p.is_alive()]
     print(f"  meta={meta['next_index']}, npy={vecs.shape[0]}, drift={drift}, alive={len(alive)}")
-    ok = (drift == 0 and len(alive) == 0)
+    ok = drift == 0 and len(alive) == 0
     print(f"  {'✅ PASS' if ok else '❌ FAIL'}")
     return ok
 
@@ -112,12 +109,12 @@ def test2_lock_code():
     content = script_path.read_text()
 
     checks = [
-        ("fcntl 导入",              "fcntl" in content),
-        ("INDEX_LOCK_FILE 定义",    "INDEX_LOCK_FILE" in content),
-        ("LOCK_EX 获取锁",          "fcntl.LOCK_EX" in content),
-        ("LOCK_UN 释放锁",          "fcntl.LOCK_UN" in content),
-        ("os.close(lock_fd)",        "os.close(lock_fd)" in content),
-        ("try/finally 包裹",         "finally:" in content),
+        ("fcntl 导入", "fcntl" in content),
+        ("INDEX_LOCK_FILE 定义", "INDEX_LOCK_FILE" in content),
+        ("LOCK_EX 获取锁", "fcntl.LOCK_EX" in content),
+        ("LOCK_UN 释放锁", "fcntl.LOCK_UN" in content),
+        ("os.close(lock_fd)", "os.close(lock_fd)" in content),
+        ("try/finally 包裹", "finally:" in content),
         ("main() 调用 _main_inner", "_main_inner()" in content),
     ]
 

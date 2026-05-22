@@ -129,7 +129,7 @@ def get_embedding(text: str, model: str = _EMBED_MODEL) -> list[float]:
     """调用 MiniMax Embedding API，返回归一化向量"""
     api_key = os.environ.get("MINIMAX_API_KEY") or os.environ.get("MINIMAX_API_KEY")
     base_url = os.environ.get("MINIMAX_API_URL", "https://api.minimax.io")
-    
+
     resp = requests.post(
         f"{base_url}/v1/embeddings",
         headers={
@@ -175,7 +175,7 @@ def store_chunk(session_id: str, text: str, embedding: list[float],
     import time, json
     conn = sqlite3.connect(EMBEDDINGS_DB)
     conn.execute("""
-        INSERT INTO memory_embeddings 
+        INSERT INTO memory_embeddings
         (session_id, chunk_index, text, embedding, concept_tags, created_at, memory_type)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (session_id, chunk_index, text, _serialize(embedding),
@@ -227,25 +227,25 @@ from .embedding_store import search_semantic
 def hybrid_search(query: str, top_k: int = 5, memory_types: list[str] = None):
     """
     融合语义和 FTS5 的搜索结果
-    
+
     RRF (Reciprocal Rank Fusion):
     score = Σ 1/(k + rank_i)，k 通常取 60
     """
     K = 60  # RRF 常数
-    
+
     # 1. 语义搜索
     query_emb = get_embedding(query)
-    semantic_results = search_semantic(query_emb, top_k=top_k * 2, 
+    semantic_results = search_semantic(query_emb, top_k=top_k * 2,
                                        memory_types=memory_types)
-    
+
     # 2. FTS5 搜索（调用 Hermes 现有 session_search）
     # 注意：这里复用 Hermes 内置的 FTS5，不重复造轮子
     from hermes_state import SessionDB
     db = SessionDB()
     raw_fts = db.search_messages(query=query, limit=top_k * 2)
-    fts_results = [{"session_id": r["session_id"], "text": r["content"], 
+    fts_results = [{"session_id": r["session_id"], "text": r["content"],
                     "score": 1.0, "concept_tags": []} for r in raw_fts]
-    
+
     # 3. RRF 融合
     rrf_scores: dict[str, float] = {}
     for rank, item in enumerate(semantic_results):
@@ -254,7 +254,7 @@ def hybrid_search(query: str, top_k: int = 5, memory_types: list[str] = None):
     for rank, item in enumerate(fts_results):
         key = f"fts_{item['session_id']}"
         rrf_scores[key] = rrf_scores.get(key, 0) + 1.0 / (K + rank + 1)
-    
+
     # 合并排序
     fused = []
     seen_texts = set()
@@ -272,7 +272,7 @@ def hybrid_search(query: str, top_k: int = 5, memory_types: list[str] = None):
             continue
         seen_texts.add(text[:50])
         fused.append({**item, "rrf_score": score})
-    
+
     return fused
 ```
 
@@ -326,14 +326,14 @@ def extract_concepts_with_llm(text: str) -> list[str]:
     """基于 LLM 提取更准确的标签（可选，精度更高）"""
     from agent.auxiliary_client import async_call_llm, extract_content_or_reasoning
     import asyncio
-    
+
     prompt = f"""从以下记忆文本中提取概念标签。
 可用标签: {', '.join(sorted(CONCEPT_TAGS))}
 只返回标签列表，用逗号分隔，不要其他内容。
 
 记忆文本:
 {text[:500]}"""
-    
+
     response = asyncio.run(async_call_llm(
         task="concept_tagging",
         messages=[{"role": "user", "content": prompt}],

@@ -9,14 +9,18 @@ Hermem 批量回填脚本
 建议用 hermes-agent venv 运行:
   /Users/oliver/.hermes/hermes-agent/venv/bin/python3 batch_backfill.py
 """
-import sys, json, glob, os, hashlib, pickle, time, re
+
+import glob
+import json
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
 # 添加 impl 到路径（需要在 "impl" 父目录才能用相对导入）
 sys.path.insert(0, str(Path(__file__).parent))
 
-from database import insert_chunk, get_chunk_count, get_cached_embedding, set_cached_embedding
+from database import insert_chunk
 from embedding import get_embedding_cached
 from vectorstore import append_vectors
 
@@ -41,12 +45,14 @@ def load_sessions():
         # 解析时间戳
         ts = data.get("started_at", 0)
         dt = datetime.fromtimestamp(ts) if ts else None
-        sessions.append({
-            "path": f,
-            "session_id": sid,
-            "started_at": dt,
-            "data": data,
-        })
+        sessions.append(
+            {
+                "path": f,
+                "session_id": sid,
+                "started_at": dt,
+                "data": data,
+            }
+        )
     return sessions
 
 
@@ -68,7 +74,8 @@ def extract_text(data):
 
 def summarize_session(text: str, session_id: str) -> str:
     """调用 Ollama 生成会话摘要"""
-    import urllib.request, urllib.error
+    import urllib.error
+    import urllib.request
 
     prompt = f"""请为以下对话会话生成一段简洁的摘要（200字以内），包含：
 1. 主要讨论主题
@@ -82,9 +89,7 @@ def summarize_session(text: str, session_id: str) -> str:
 
     payload = {
         "model": OLLAMA_MODEL,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
+        "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 300,
         "temperature": 0.3,
     }
@@ -109,18 +114,54 @@ def extract_concepts(summary: str) -> list[str]:
     """从摘要中提取概念标签"""
     # 简单规则：技术词汇匹配
     keywords = [
-        "量子", "QKD", "AES", "RSA", "PQC", "量子计算", "量子通讯",
-        "加密", "密码学", "密钥", "贝尔不等式", "BB84",
-        "StoryAgent", "Story", "故事", "小说",
-        "Weibo", "微博", "监控", "爬虫",
-        "Claude", "Code", "编程", "开发",
-        "飞书", "WeChat", "微信", "Telegram",
-        "Hermes", "Agent", "AI",
-        "MiniMax", "Ollama", "LLM", "Embedding",
-        " comic", "连环画", "分镜", "定妆照",
-        "SEO", "网站", "博客",
-        "Apple", "macOS", "iPhone",
-        "cron", "定时", "自动化",
+        "量子",
+        "QKD",
+        "AES",
+        "RSA",
+        "PQC",
+        "量子计算",
+        "量子通讯",
+        "加密",
+        "密码学",
+        "密钥",
+        "贝尔不等式",
+        "BB84",
+        "StoryAgent",
+        "Story",
+        "故事",
+        "小说",
+        "Weibo",
+        "微博",
+        "监控",
+        "爬虫",
+        "Claude",
+        "Code",
+        "编程",
+        "开发",
+        "飞书",
+        "WeChat",
+        "微信",
+        "Telegram",
+        "Hermes",
+        "Agent",
+        "AI",
+        "MiniMax",
+        "Ollama",
+        "LLM",
+        "Embedding",
+        " comic",
+        "连环画",
+        "分镜",
+        "定妆照",
+        "SEO",
+        "网站",
+        "博客",
+        "Apple",
+        "macOS",
+        "iPhone",
+        "cron",
+        "定时",
+        "自动化",
     ]
     found = [k for k in keywords if k in summary]
     return found[:5]  # 最多5个标签
@@ -129,14 +170,12 @@ def extract_concepts(summary: str) -> list[str]:
 def is_already_indexed(session_id: str) -> bool:
     """检查此 session 是否已被索引（查 Hermem.db）"""
     import sqlite3
+
     if not MEMORY_DB.exists():
         return False
     try:
         conn = sqlite3.connect(MEMORY_DB)
-        cur = conn.execute(
-            "SELECT 1 FROM chunks WHERE session_id = ? LIMIT 1",
-            (session_id,)
-        )
+        cur = conn.execute("SELECT 1 FROM chunks WHERE session_id = ? LIMIT 1", (session_id,))
         result = cur.fetchone()
         conn.close()
         return result is not None
@@ -162,14 +201,14 @@ def index_session(session: dict, dry_run: bool = False) -> bool:
     raw_text = extract_text(session["data"])
 
     # 生成摘要
-    print(f"    生成摘要中...")
+    print("    生成摘要中...")
     summary = summarize_session(raw_text, sid)
 
     # 提取概念
     concepts = extract_concepts(summary)
 
     # 生成 embedding
-    print(f"    生成 embedding 中...")
+    print("    生成 embedding 中...")
     emb, src = get_embedding_cached(summary)
 
     # 写入数据库 + 向量库
@@ -193,7 +232,7 @@ def main():
     dry_run = "--dry-run" in sys.argv
 
     sessions = load_sessions()
-    print(f"=== Hermem 批量回填 ===")
+    print("=== Hermem 批量回填 ===")
     print(f"  发现 {len(sessions)} 条会话")
     print(f"  模式: {'仅预览' if dry_run else '实际写入'}")
     print()
@@ -212,7 +251,7 @@ def main():
         time.sleep(0.1)  # 避免 Ollama 过载
 
     print()
-    print(f"=== 完成 ===")
+    print("=== 完成 ===")
     print(f"  新增索引: {indexed} 条")
     print(f"  跳过: {skipped} 条")
 
@@ -220,6 +259,7 @@ def main():
         # 最终统计
         from database import get_chunk_count
         from vectorstore import get_stats
+
         print(f"  Hermem 当前: {get_chunk_count()} 条记忆, 向量 {get_stats()['total_vectors']} 条")
 
 

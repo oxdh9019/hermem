@@ -2,24 +2,35 @@
 """
 从 state.db 批量提取会话摘要，再跑 L1 提取，收集足量 facts 做模拟测试。
 """
-import sys, os, time, sqlite3, json, random
+
+import os
+import random
+import sqlite3
+import sys
+from pathlib import Path
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT + "/phase3")  # 显式指向 phase3/impl/ 而非 legacy impl/
 os.chdir(PROJECT_ROOT + "/phase3")
 
-from impl import extract_l1_facts, store_l1_batch, save_l0_raw, try_aggregate_l2
 from datetime import datetime
+
+from impl import extract_l1_facts, save_l0_raw, store_l1_batch, try_aggregate_l2
 
 DB = os.environ.get("HERMES_STATE_DB", str(Path.home() / ".hermes" / "state.db"))
 OUT_DB = os.environ.get("HERMEM_DB", str(Path.home() / ".hermes" / "memory" / "l0_l3.db"))
 
+
 def build_session_summary(conn, session_id: str) -> str:
     """从 messages 表聚合单个会话的文本内容"""
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT role, content FROM messages
         WHERE session_id = ?
         ORDER BY timestamp ASC
-    """, [session_id]).fetchall()
+    """,
+        [session_id],
+    ).fetchall()
 
     parts = []
     for role, content in rows:
@@ -27,11 +38,11 @@ def build_session_summary(conn, session_id: str) -> str:
             continue
         # 截断过长消息
         if len(content) > 2000:
-            content = content[:2000] + '...[截断]'
-        prefix = 'User' if role == 'user' else 'Assistant'
+            content = content[:2000] + "...[截断]"
+        prefix = "User" if role == "user" else "Assistant"
         parts.append(f"{prefix}: {content}")
 
-    return '\n'.join(parts)
+    return "\n".join(parts)
 
 
 def main():
@@ -53,8 +64,12 @@ def main():
     failed = 0
 
     for i, (sid, started, ended, title) in enumerate(sessions):
-        started_dt = datetime.fromtimestamp(started).isoformat() if started else datetime.now().isoformat()
-        ended_dt = datetime.fromtimestamp(ended).isoformat() if ended else datetime.now().isoformat()
+        started_dt = (
+            datetime.fromtimestamp(started).isoformat() if started else datetime.now().isoformat()
+        )
+        ended_dt = (
+            datetime.fromtimestamp(ended).isoformat() if ended else datetime.now().isoformat()
+        )
 
         # 跳过 title 过长的
         if title and len(str(title)) > 500:
@@ -84,28 +99,29 @@ def main():
             if facts:
                 # 写入 OUT_DB
                 fact_ids = store_l1_batch(facts, l0_ref)
-                written = [{**f, "id": fid} for f, fid in zip(facts, fact_ids)]
+                written = [{**f, "id": fid} for f, fid in zip(facts, fact_ids, strict=False)]
                 try_aggregate_l2(written)
                 all_facts.extend([(f, sid) for f in facts])
-                print(f"  [{i+1:2d}] {sid[:20]}... → {len(facts)} facts")
+                print(f"  [{i + 1:2d}] {sid[:20]}... → {len(facts)} facts")
             else:
-                print(f"  [{i+1:2d}] {sid[:20]}... → 0 facts")
+                print(f"  [{i + 1:2d}] {sid[:20]}... → 0 facts")
 
         except Exception as e:
             failed += 1
-            print(f"  [{i+1:2d}] ERROR: {e}")
+            print(f"  [{i + 1:2d}] ERROR: {e}")
 
     print(f"\n完成: {len(all_facts)} facts from {len(sessions)} sessions")
     print(f"失败: {failed}")
 
     # 输出统计
     from collections import Counter
+
     type_counter = Counter()
     value_counter = Counter()
     for f, _ in all_facts:
-        for t in f.get('types', []):
+        for t in f.get("types", []):
             type_counter[t] += 1
-        value_counter[f.get('value', '?')] += 1
+        value_counter[f.get("value", "?")] += 1
 
     print("\n按类型分布:")
     for t, cnt in type_counter.most_common():
@@ -126,5 +142,5 @@ def main():
             print(f"   session: {sid[:20]}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

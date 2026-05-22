@@ -13,18 +13,21 @@ Output:
   - pending add payload -> ~/.hermes/journal/.journal_to_add_YYYY-MM-DD.json
 """
 
-import sys, json, re
-from pathlib import Path
-from datetime import datetime, timedelta
+import json
+import re
 import sqlite3
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
 
 # Paths
 HERMEM_HOME = Path.home() / ".hermes"
-MEMORY_DB   = HERMEM_HOME / "memory" / "hermem.db"
-L0_DIR      = HERMEM_HOME / "memory" / "l0_raw"
+MEMORY_DB = HERMEM_HOME / "memory" / "hermem.db"
+L0_DIR = HERMEM_HOME / "memory" / "l0_raw"
 JOURNAL_DIR = HERMEM_HOME / "journal"
-LEARNINGS   = HERMEM_HOME / "active_learnings_daily.md"
+LEARNINGS = HERMEM_HOME / "active_learnings_daily.md"
 JOURNAL_DIR.mkdir(exist_ok=True)
+
 
 # MiniMax (lazy load from hermes auth.json credential pool)
 def _get_minimax_credentials() -> dict:
@@ -34,28 +37,33 @@ def _get_minimax_credentials() -> dict:
     _cred = json.loads(_AUTH_PATH.read_text())
     return _cred["credential_pool"]["minimax-cn"][0]
 
+
 def _get_llm_client():
     creds = _get_minimax_credentials()
     MINIMAX_API_KEY = creds["access_token"]
     MINIMAX_BASE_URL = "https://api.minimaxi.com/anthropic"
     return MINIMAX_API_KEY, MINIMAX_BASE_URL
 
+
 LLM_MODEL = "MiniMax-M2.7"
 
 # Time range (Beijing = UTC+8)
-now_cst   = datetime.now() + timedelta(hours=8)
+now_cst = datetime.now() + timedelta(hours=8)
 today_cst = now_cst.date()
-start_ts  = datetime.combine(today_cst - timedelta(days=1), datetime.min.time())
-end_ts    = datetime.combine(today_cst, datetime.min.time())
+start_ts = datetime.combine(today_cst - timedelta(days=1), datetime.min.time())
+end_ts = datetime.combine(today_cst, datetime.min.time())
+
 
 def to_jd(dt):
     return dt.toordinal() + 1721424.5
 
+
 START_JD = to_jd(start_ts)
-END_JD   = to_jd(end_ts)
+END_JD = to_jd(end_ts)
 
 
 # ── Data fetching ─────────────────────────────────────────────────────────────
+
 
 def fetch_session_summaries(start_jd=None, end_jd=None):
     """获取指定时间范围内的会话摘要。接受儒略日参数或 datetime 参数。"""
@@ -69,14 +77,17 @@ def fetch_session_summaries(start_jd=None, end_jd=None):
     if isinstance(end_jd, datetime):
         end_jd = to_jd(end_jd)
 
-    rows = cur.execute("""
+    rows = cur.execute(
+        """
         SELECT session_id, content
         FROM chunks
         WHERE chunk_type = 'session_summary'
           AND created_at >= ?
           AND created_at < ?
         ORDER BY created_at ASC
-    """, (start_jd or START_JD, end_jd or END_JD)).fetchall()
+    """,
+        (start_jd or START_JD, end_jd or END_JD),
+    ).fetchall()
     conn.close()
     return [(r["session_id"], r["content"]) for r in rows]
 
@@ -114,10 +125,13 @@ def fetch_learnings():
 
 # ── Prompt assembly ───────────────────────────────────────────────────────────
 
+
 def build_prompt(summaries, messages_by_session, learnings_md, date_str):
     # Separate real dialogue sessions from background ones
-    real_sessions = {sid: content for sid, content in summaries if sid in messages_by_session}
-    background_sessions = [(sid, content) for sid, content in summaries if sid not in messages_by_session]
+    {sid: content for sid, content in summaries if sid in messages_by_session}
+    background_sessions = [
+        (sid, content) for sid, content in summaries if sid not in messages_by_session
+    ]
 
     # Format real dialogue blocks
     NL = "\n"
@@ -139,19 +153,19 @@ def build_prompt(summaries, messages_by_session, learnings_md, date_str):
         f"\n"
         f"以下是昨天（{date_str}）与 Oliver 的工作记录：\n"
         f"\n"
-        f"{'='*50}\n"
+        f"{'=' * 50}\n"
         f"【真实对话片段】（以下是对话原文，请务必围绕这些内容写）\n"
-        f"{'='*50}\n"
+        f"{'=' * 50}\n"
         f"{real_text}\n"
         f"\n"
-        f"{'='*50}\n"
+        f"{'=' * 50}\n"
         f"【背景摘要】（以下为系统任务记录，不是真实对话，简略参考）\n"
-        f"{'='*50}\n"
+        f"{'=' * 50}\n"
         f"{bg_text}\n"
         f"\n"
-        f"{'='*50}\n"
+        f"{'=' * 50}\n"
         f"【当日 Learnings / Dispositions 状态】\n"
-        f"{'='*50}\n"
+        f"{'=' * 50}\n"
         f"{learnings_text}\n"
         f"\n"
         f"请根据以上材料，写一篇日记，五个 section 如下（顺序固定，内容不许空洞）：\n"
@@ -159,7 +173,7 @@ def build_prompt(summaries, messages_by_session, learnings_md, date_str):
         f"## 帮 Oliver 解决了什么问题\n"
         f"（叙述体，1-3件事，不要列表，每件事一两句话说清楚）\n"
         f"## 今天被揪住了什么问题\n"
-        f"（Oliver 指出的错误或纠正，包括：你当时怎么想、后来怎么改。不许写\"无\"或\"没有\"。）\n"
+        f'（Oliver 指出的错误或纠正，包括：你当时怎么想、后来怎么改。不许写"无"或"没有"。）\n'
         f"## 今天学到了什么新东西\n"
         f"（新认知、方法、对 Oliver 的新理解，不许空洞）\n"
         f"## 印象最深的一刻\n"
@@ -170,21 +184,22 @@ def build_prompt(summaries, messages_by_session, learnings_md, date_str):
         f"要求：\n"
         f"- 完全从你的视角写，不许写成 Oliver 的工作总结\n"
         f"- 每个 section 都必须有实质性内容，不许跳过\n"
-        f"- \"被揪住\" section 不许写\"无\"，昨天一定有值得反思的事\n"
+        f'- "被揪住" section 不许写"无"，昨天一定有值得反思的事\n'
         f"\n"
         f"输出格式（严格 JSON，不要 markdown 包裹）：\n"
-        f'{{\n'
+        f"{{\n"
         f'  "帮 Oliver 解决了什么问题": "...",\n'
         f'  "今天被揪住了什么问题": "...",\n'
         f'  "今天学到了什么新东西": "...",\n'
         f'  "印象最深的一刻": "...",\n'
         f'  "小结与展望": "..."\n'
-        f'}}'
+        f"}}"
     )
     return instructions
 
 
 # ── LLM call ───────────────────────────────────────────────────────────────────
+
 
 def call_llm(prompt: str) -> dict:
     import urllib.request
@@ -195,7 +210,7 @@ def call_llm(prompt: str) -> dict:
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 8192,
         "temperature": 0.7,
-        "no_think": True
+        "no_think": True,
     }
 
     body = json.dumps(payload).encode()
@@ -206,7 +221,7 @@ def call_llm(prompt: str) -> dict:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
             "anthropic-version": "2023-06-01",
-        }
+        },
     )
 
     try:
@@ -236,17 +251,17 @@ def call_llm(prompt: str) -> dict:
                     elif ch == "}":
                         depth -= 1
                         if depth == 0:
-                            parsed = json.loads(raw[start:start+i+1])
+                            parsed = json.loads(raw[start : start + i + 1])
                             break
                 if parsed is None:
-                    raise ValueError("Could not find matching braces in LLM response")
+                    raise ValueError("Could not find matching braces in LLM response") from None
             # Validate keys
             required = [
                 "帮 Oliver 解决了什么问题",
                 "今天被揪住了什么问题",
                 "今天学到了什么新东西",
                 "印象最深的一刻",
-                "小结与展望"
+                "小结与展望",
             ]
             for k in required:
                 if k not in parsed:
@@ -266,7 +281,10 @@ def call_llm(prompt: str) -> dict:
                 if m:
                     parsed[k] = m.group(1)
             if len(parsed) >= 3:  # at least 3/5 keys found
-                print(f"[journal] Fallback parse recovered {len(parsed)}/{len(required)} keys", file=sys.stderr)
+                print(
+                    f"[journal] Fallback parse recovered {len(parsed)}/{len(required)} keys",
+                    file=sys.stderr,
+                )
                 return parsed
         except Exception:
             pass
@@ -275,8 +293,8 @@ def call_llm(prompt: str) -> dict:
 
 # ── Output ────────────────────────────────────────────────────────────────────
 
+
 def format_journal(entry, date_str, start_ts, end_ts, n_summaries, n_messages):
-    NL = "\n"
     md = (
         f"# Hermem 日记 · {date_str}\n"
         f"\n"
@@ -314,7 +332,7 @@ def write_pending_add(journal_md, date_str):
         "chunk_type": "concept_note",
         "content": journal_md,
         "concepts": "daily-journal,reflection",
-        "source": f"journal_{date_str}"
+        "source": f"journal_{date_str}",
     }
     payload_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     print(f"[journal] Pending add payload: {payload_path}")
@@ -322,17 +340,18 @@ def write_pending_add(journal_md, date_str):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+
 def main():
     # Optional --date override for backfill
     if len(sys.argv) >= 2 and sys.argv[1] == "--date":
         date_str = sys.argv[2]
         start_ts = datetime.strptime(date_str, "%Y-%m-%d")
-        end_ts   = start_ts + timedelta(days=1)
+        end_ts = start_ts + timedelta(days=1)
         print(f"[journal] Backfill mode: {date_str}")
     else:
         date_str = (today_cst - timedelta(days=1)).strftime("%Y-%m-%d")
         start_ts = datetime.strptime(date_str, "%Y-%m-%d")
-        end_ts   = start_ts + timedelta(days=1)
+        end_ts = start_ts + timedelta(days=1)
     print(f"[journal] Generating journal for {date_str}")
     print(f"[journal] Time range: {start_ts} -> {end_ts}")
 
@@ -363,6 +382,7 @@ def main():
 
     write_pending_add(journal_md, date_str)
     print("[journal] Done.")
+
 
 if __name__ == "__main__":
     main()

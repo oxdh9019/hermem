@@ -8,7 +8,7 @@ tests/unit/test_disposition_updater.py
 - compute_disposition_weight()  B6 衰减公式：f_time × f_freq
 """
 
-import sys, os
+import sys
 from pathlib import Path
 
 # 确保 impl 模块可导入
@@ -16,12 +16,12 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "phase3"))
 
 import pytest
-from impl.disposition_updater import extract_keywords, compute_disposition_weight
-
+from impl.disposition_updater import compute_disposition_weight, extract_keywords
 
 # ─────────────────────────────────────────────────────────────────
 # extract_keywords() 测试
 # ─────────────────────────────────────────────────────────────────
+
 
 class TestExtractKeywords_Basics:
     """基础功能"""
@@ -40,7 +40,7 @@ class TestExtractKeywords_Basics:
         assert "是" not in result
         assert "我" not in result
         assert "人" not in result  # 单字被 len>1 过滤
-        assert "一个" in result    # bigram 被保留
+        assert "一个" in result  # bigram 被保留
         assert "可爱" in result
 
     def test_english_stopwords_filtered(self):
@@ -87,7 +87,7 @@ class TestExtractKeywords_Chinese:
         # 停用词过滤
         assert "是" not in result
         assert "一" not in result  # 单字被过滤
-        assert "一种" in result    # bigram 被保留
+        assert "一种" in result  # bigram 被保留
 
 
 class TestExtractKeywords_KeywordOverlap:
@@ -122,6 +122,7 @@ class TestExtractKeywords_KeywordOverlap:
 # compute_disposition_weight() 测试 — B6 衰减公式
 # ─────────────────────────────────────────────────────────────────
 
+
 class TestDispositionWeight_fFreq:
     """频次增强因子 f_freq 边界测试"""
 
@@ -143,8 +144,7 @@ class TestDispositionWeight_fFreq:
     def test_error_count_five_capped(self, half_life_days=7.0, max_factor=2.0):
         """error_count 足够大时 f_freq 上限为 max_factor"""
         # 1 + (20-1)*0.2 = 4.8 > 2.0，上限 cap
-        w = compute_disposition_weight(last_error_at=None, error_count=20,
-                                       max_factor=max_factor)
+        w = compute_disposition_weight(last_error_at=None, error_count=20, max_factor=max_factor)
         assert w == pytest.approx(2.0)
 
     def test_frequency_factor_only_depends_on_error_count(self):
@@ -167,6 +167,7 @@ class TestDispositionWeight_fTime:
     def test_half_life_decay(self):
         """半衰期后 f_time = 0.5"""
         import datetime
+
         half_life_days = 7.0
         exactly_half_life_ago = (
             datetime.datetime.now() - datetime.timedelta(days=half_life_days)
@@ -181,6 +182,7 @@ class TestDispositionWeight_fTime:
     def test_double_half_life_decay(self):
         """2倍半衰期后 f_time ≈ 0.25"""
         import datetime
+
         half_life_days = 7.0
         double_half_life_ago = (
             datetime.datetime.now() - datetime.timedelta(days=half_life_days * 2)
@@ -204,6 +206,7 @@ class TestDispositionWeight_Combined:
     def test_recent_high_frequency_wins(self):
         """近期 + 高频 → 最高权重"""
         import datetime
+
         recent = (datetime.datetime.now() - datetime.timedelta(days=1)).isoformat()
         w = compute_disposition_weight(
             last_error_at=recent,
@@ -216,6 +219,7 @@ class TestDispositionWeight_Combined:
     def test_old_low_frequency_minimal(self):
         """远期 + 低频 → 最低权重"""
         import datetime
+
         old = (datetime.datetime.now() - datetime.timedelta(days=30)).isoformat()
         w = compute_disposition_weight(
             last_error_at=old,
@@ -228,6 +232,7 @@ class TestDispositionWeight_Combined:
     def test_weight_bounds(self):
         """权重在合理范围内"""
         import datetime
+
         now = datetime.datetime.now().isoformat()
         for ec in range(0, 30):
             w = compute_disposition_weight(
@@ -242,21 +247,21 @@ class TestDispositionWeight_Combined:
     def test_weight_increases_with_error_count(self):
         """相同时间下，error_count 越高权重越高（到 cap 前）"""
         import datetime
+
         same_time = (datetime.datetime.now() - datetime.timedelta(days=3)).isoformat()
         weights = {
             ec: compute_disposition_weight(last_error_at=same_time, error_count=ec)
             for ec in range(0, 7)  # 0-6，7 触 cap
         }
         for ec in range(1, 7):
-            assert weights[ec] > weights[ec - 1], \
+            assert weights[ec] > weights[ec - 1], (
                 f"weight should increase with error_count: ec={ec}"
+            )
 
     def test_weight_caps_at_max_factor(self):
         """error_count 足够大时权重被 max_factor cap"""
-        w_low = compute_disposition_weight(last_error_at=None, error_count=20,
-                                           max_factor=2.0)
-        w_high = compute_disposition_weight(last_error_at=None, error_count=100,
-                                            max_factor=2.0)
+        w_low = compute_disposition_weight(last_error_at=None, error_count=20, max_factor=2.0)
+        w_high = compute_disposition_weight(last_error_at=None, error_count=100, max_factor=2.0)
         assert w_low == pytest.approx(2.0)
         assert w_high == pytest.approx(2.0)
         assert w_low == w_high  # 都触 cap

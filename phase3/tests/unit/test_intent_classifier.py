@@ -9,190 +9,236 @@ tests/unit/test_intent_classifier.py
 - IntentClassifier.classify()  — Layer1 hit/Layer2 fallback 行为
 """
 
-import sys, os
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "phase3"))
 
-import pytest
 from unittest.mock import patch
-from impl.intent_classifier import (
-    _match_triggers,
-    IntentClassifier,
-    INTENT_TRIGGERS,
-    INTENT_DESCRIPTIONS,
-)
 
+import pytest
+from impl.intent_classifier import (
+    INTENT_DESCRIPTIONS,
+    INTENT_TRIGGERS,
+    IntentClassifier,
+    _match_triggers,
+)
 
 # ─────────────────────────────────────────────────────────────────
 # _match_triggers() — 13 意图 × 关键触发词
 # ─────────────────────────────────────────────────────────────────
 
+
 class TestMatchTriggers_learn:
-    @pytest.mark.parametrize("msg", [
-        "什么是薛定谔的猫",
-        "为什么天空是蓝色的",
-        "怎么才能学会 Python",
-        "帮我理解量子纠缠",
-        "解释一下相对论",
-        "科普一下区块链",
-        "详细说明一下这个原理",
-        "这是怎么回事",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "什么是薛定谔的猫",
+            "为什么天空是蓝色的",
+            "怎么才能学会 Python",
+            "帮我理解量子纠缠",
+            "解释一下相对论",
+            "科普一下区块链",
+            "详细说明一下这个原理",
+            "这是怎么回事",
+        ],
+    )
     def test_learn_triggers(self, msg):
         assert _match_triggers(msg) == "learn"
 
 
 class TestMatchTriggers_execute:
-    @pytest.mark.parametrize("msg", [
-        "帮我生成一段 Python 代码",
-        "跑一下这个测试",
-        "创建一个文件夹",
-        "帮我做一个网页",
-        "执行这条命令",
-        "写一个爬虫脚本",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "帮我生成一段 Python 代码",
+            "跑一下这个测试",
+            "创建一个文件夹",
+            "帮我做一个网页",
+            "执行这条命令",
+            "写一个爬虫脚本",
+        ],
+    )
     def test_execute_triggers(self, msg):
         assert _match_triggers(msg) == "execute"
 
 
 class TestMatchTriggers_correct:
-    @pytest.mark.parametrize("msg", [
-        "不对，我不是这个意思",
-        "错了，应该是这样",
-        "不是这样，纠正一下",
-        "你理解错了，重新来",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "不对，我不是这个意思",
+            "错了，应该是这样",
+            "不是这样，纠正一下",
+            "你理解错了，重新来",
+        ],
+    )
     def test_correct_triggers(self, msg):
         assert _match_triggers(msg) == "correct"
 
 
 class TestMatchTriggers_close:
-    @pytest.mark.parametrize("msg", [
-        "关闭这个流程",
-        "好了，就到这里吧",
-        "结束吧，可以了",
-        "就这样，够了",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "关闭这个流程",
+            "好了，就到这里吧",
+            "结束吧，可以了",
+            "就这样，够了",
+        ],
+    )
     def test_close_triggers(self, msg):
         assert _match_triggers(msg) == "close"
 
 
 class TestMatchTriggers_feedback:
-    @pytest.mark.parametrize("msg", [
-        "太啰嗦了，精简一点",
-        "不够具体，再详细点",
-        "太简单了，再深入一些",
-        "不满意，重做",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "太啰嗦了，精简一点",
+            "不够具体，再详细点",
+            "太简单了，再深入一些",
+            "不满意，重做",
+        ],
+    )
     def test_feedback_triggers(self, msg):
         assert _match_triggers(msg) == "feedback"
 
 
 class TestMatchTriggers_confirm:
-    @pytest.mark.parametrize("msg", [
-        "你确定这是对的吗",
-        "真的假的",
-        "确认一下这个结论",
-        "真的吗？",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "你确定这是对的吗",
+            "真的假的",
+            "确认一下这个结论",
+            "真的吗？",
+        ],
+    )
     def test_confirm_triggers(self, msg):
         assert _match_triggers(msg) == "confirm"
 
 
 class TestMatchTriggers_suggest:
-    @pytest.mark.parametrize("msg", [
-        "有什么改进建议吗",
-        "给我推荐一个方案",
-        "优化建议是什么",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "有什么改进建议吗",
+            "给我推荐一个方案",
+            "优化建议是什么",
+        ],
+    )
     def test_suggest_triggers(self, msg):
         assert _match_triggers(msg) == "suggest"
 
 
 class TestMatchTriggers_remember:
-    @pytest.mark.parametrize("msg", [
-        "你还记得我们之前讨论的吗",
-        "记得上次说过的方案吗",
-        "之前我们提过这个",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "你还记得我们之前讨论的吗",
+            "记得上次说过的方案吗",
+            "之前我们提过这个",
+        ],
+    )
     def test_remember_triggers(self, msg):
         assert _match_triggers(msg) == "remember"
 
 
 class TestMatchTriggers_modify:
-    @pytest.mark.parametrize("msg", [
-        "把这个改成中文版本",
-        "语气改一下",
-        "调整一下格式",
-        "换一种表达方式",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "把这个改成中文版本",
+            "语气改一下",
+            "调整一下格式",
+            "换一种表达方式",
+        ],
+    )
     def test_modify_triggers(self, msg):
         assert _match_triggers(msg) == "modify"
 
 
 class TestMatchTriggers_stop:
-    @pytest.mark.parametrize("msg", [
-        "算了，不用了",
-        "停，取消吧",
-        "取消操作",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "算了，不用了",
+            "停，取消吧",
+            "取消操作",
+        ],
+    )
     def test_stop_triggers(self, msg):
         assert _match_triggers(msg) == "stop"
 
 
 class TestMatchTriggers_question:
-    @pytest.mark.parametrize("msg", [
-        "露娜是谁",
-        "这个文件在哪来的",
-        "你有多少个模型",
-        "项目里有几个文件",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "露娜是谁",
+            "这个文件在哪来的",
+            "你有多少个模型",
+            "项目里有几个文件",
+        ],
+    )
     def test_question_triggers(self, msg):
         assert _match_triggers(msg) == "question"
 
 
 class TestMatchTriggers_consult:
-    @pytest.mark.parametrize("msg", [
-        "你对这个方案怎么看",
-        "帮我分析一下这个问题",
-        "你认为哪个更好",
-        "你的意见是什么",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "你对这个方案怎么看",
+            "帮我分析一下这个问题",
+            "你认为哪个更好",
+            "你的意见是什么",
+        ],
+    )
     def test_consult_triggers(self, msg):
         assert _match_triggers(msg) == "consult"
 
 
 class TestMatchTriggers_evaluate:
-    @pytest.mark.parametrize("msg", [
-        "这两个方案哪个更好",
-        "评估一下这个策略",
-        "哪个选择更优",
-        "比较一下 A 和 B",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "这两个方案哪个更好",
+            "评估一下这个策略",
+            "哪个选择更优",
+            "比较一下 A 和 B",
+        ],
+    )
     def test_evaluate_triggers(self, msg):
         assert _match_triggers(msg) == "evaluate"
 
 
 class TestMatchTriggers_noMatch:
     """无触发词 → 返回 None"""
-    @pytest.mark.parametrize("msg", [
-        "好吧",
-        "随便",
-        "OK",
-        "可以",
-        "好的",
-        "嗯",
-    ])
+
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "好吧",
+            "随便",
+            "OK",
+            "可以",
+            "好的",
+            "嗯",
+        ],
+    )
     def test_no_match_returns_none(self, msg):
         assert _match_triggers(msg) is None
 
 
 class TestMatchTriggers_caseInsensitive:
     """触发词匹配不区分大小写"""
+
     def test_uppercase(self):
         assert _match_triggers("什么是量子纠缠") == "learn"
+
     def test_mixed_case(self):
         assert _match_triggers("什么是 PYTHON") == "learn"
 
@@ -200,6 +246,7 @@ class TestMatchTriggers_caseInsensitive:
 # ─────────────────────────────────────────────────────────────────
 # IntentClassifier._parse() — LLM 输出解析
 # ─────────────────────────────────────────────────────────────────
+
 
 class TestIntentClassifier_parse:
     """解析各种格式的 LLM 输出"""
@@ -241,6 +288,7 @@ class TestIntentClassifier_parse:
 # ─────────────────────────────────────────────────────────────────
 # IntentClassifier.classify() — Layer1/Layer2 行为验证
 # ─────────────────────────────────────────────────────────────────
+
 
 class TestIntentClassifier_classify:
     """Layer1 命中 → 不调用 LLM；Layer1 未命中 → 调用 LLM"""
@@ -310,6 +358,7 @@ class TestIntentClassifier_classify:
 # INTENT_DESCRIPTIONS 完整性
 # ─────────────────────────────────────────────────────────────────
 
+
 class TestIntentCoverage:
     """确保 13 种意图都有触发词和描述"""
 
@@ -319,8 +368,10 @@ class TestIntentCoverage:
             assert len(INTENT_TRIGGERS[intent]) > 0, f"Intent '{intent}' has no trigger words"
 
     def test_all_trigger_words_point_to_valid_intents(self):
-        for intent, triggers in INTENT_TRIGGERS.items():
-            assert intent in INTENT_DESCRIPTIONS, f"Trigger list '{intent}' has no matching description"
+        for intent, _triggers in INTENT_TRIGGERS.items():
+            assert intent in INTENT_DESCRIPTIONS, (
+                f"Trigger list '{intent}' has no matching description"
+            )
 
 
 if __name__ == "__main__":
