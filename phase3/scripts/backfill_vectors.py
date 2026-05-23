@@ -184,6 +184,20 @@ def get_orphan_chunks_v2() -> list[tuple]:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
+def check_drift(meta: dict, current_npy_rows: int) -> bool:
+    """
+    Preflight: compare meta next_index vs actual npy rows.
+    Returns True if drift detected (mismatch).
+    Prints diagnostic info.
+    """
+    next_idx = meta.get("next_index", 706)
+    drift = next_idx != current_npy_rows
+    print(f"  npy rows : {current_npy_rows}")
+    print(f"  next_idx : {next_idx}")
+    print(f"  drift?   : {'⚠ YES — next_index ahead of npy rows' if drift else 'none'}")
+    return drift
+
+
 def main():
     t0 = time.time()
 
@@ -191,10 +205,21 @@ def main():
     print("Hermem Vector Backfill Script")
     print("=" * 60)
 
-    # Load current state
+    # ── Preflight: quick drift check ─────────────────────────────────────────
     meta = load_meta()
     current_npy_rows = get_current_npy_shape()[0]
     next_idx = meta.get("next_index", 706)
+
+    print("\n[PREFLIGHT] Checking meta vs npy consistency...")
+    drift = check_drift(meta, current_npy_rows)
+    if drift:
+        print("\n  ⚠ DRIFT DETECTED:")
+        print(f"     meta.next_index={next_idx} but npy has only {current_npy_rows} rows.")
+        print(
+            f"     Gap of {next_idx - current_npy_rows} rows. Backfill may write to wrong positions."
+        )
+        print(f"     Recommend: fix meta.next_index = {current_npy_rows} before proceeding.")
+        print(f"\n     To auto-fix: set next_index = {current_npy_rows} and re-run.\n")
 
     print(f"Current npy rows : {current_npy_rows}")
     print(f"meta next_index  : {next_idx}")
@@ -256,34 +281,63 @@ def main():
     # ── Phase 2: Append to npy ───────────────────────────────────────────────
     print(f"\n[2/3] Appending {total} vectors to npy...")
 
-    # Build stacked array in order
-    new_vectors = np.stack([embeddings[i] for i in range(total)], axis=0)
-    print(f"  new_vectors shape: {new_vectors.shape}")
+    # ── Lock: verify npy hasn't changed since we read it ──────────────────────
+    print("  [LOCK] Acquiring file lock to verify npy state...")
+    with FileLock(LOCK_FILE, timeout=10.0):
+        npy_rows_now = get_current_npy_shape()[0]
+        if npy_rows_now != current_npy_rows:
+            raise RuntimeError(
+                f"NPY CHANGED while generating embeddings! Was {current_npy_rows}, now {npy_rows_now}. "
+                f"Another process wrote to npy. Aborting to avoid off-by-one drift."
+            )
+        print(f"  [LOCK] npy rows unchanged ({npy_rows_now}), safe to write.")
 
-    # Append
-    vecs = np.load(NPY_PATH)
-    new_vecs = np.vstack([vecs, new_vectors])
-    np.save(NPY_PATH, new_vecs)
-    new_npy_rows = new_vecs.shape[0]
-    print(f"  npy rows: {current_npy_rows} -> {new_npy_rows}")
+        # Build stacked array in order
+        new_vectors = np.stack([embeddings[i] for i in range(total)], axis=0)
+        print(f"  new_vectors shape: {new_vectors.shape}")
+
+        # Append
+        vecs = np.load(NPY_PATH)
+        new_vecs = np.vstack([vecs, new_vectors])
+        np.save(NPY_PATH, new_vecs)
+        new_npy_rows = new_vecs.shape[0]
+        print(f"  npy rows: {current_npy_rows} -> {new_npy_rows}")
 
     # ── Phase 3: Update DB ───────────────────────────────────────────────────
     print(f"\n[3/3] Updating DB vec_index in batches of {BATCH_SIZE}...")
 
-    new_indices = list(range(next_idx, next_idx + total))
-    ids_ordered = [ids[i] for i in range(total)]
+    # ── Lock: verify orphans still need backfill ──────────────────────────────
+    print("  [LOCK] Re-checking orphan status before DB write...")
+    with FileLock(LOCK_FILE, timeout=10.0):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute(
+            "SELECT COUNT(*) FROM chunks WHERE vec_index IS NULL OR vec_index = -1 OR vec_index >= ?",
+            (next_idx,),
+        )
+        stale_count = c.fetchone()[0]
+        conn.close()
+        if stale_count != total:
+            raise RuntimeError(
+                f"Orphan count changed while generating! Expected {total}, now {stale_count}. "
+                f"Another process may have backfilled. DB update aborted to prevent double-assign."
+            )
+        print(f"  [LOCK] orphan count unchanged ({stale_count}), safe to update DB.")
 
-    for batch_start in range(0, total, BATCH_SIZE):
-        batch_end = min(batch_start + BATCH_SIZE, total)
-        batch_ids = ids_ordered[batch_start:batch_end]
-        batch_indices = new_indices[batch_start:batch_end]
-        update_db_batch(batch_ids, batch_indices)
-        print(f"  batch {batch_start}-{batch_end} ({len(batch_ids)} rows)")
+        new_indices = list(range(next_idx, next_idx + total))
+        ids_ordered = [ids[i] for i in range(total)]
 
-    # ── Update meta ──────────────────────────────────────────────────────────
-    meta["next_index"] = next_idx + total
-    save_meta(meta)
-    print(f"\nMeta updated: next_index = {meta['next_index']}")
+        for batch_start in range(0, total, BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, total)
+            batch_ids = ids_ordered[batch_start:batch_end]
+            batch_indices = new_indices[batch_start:batch_end]
+            update_db_batch(batch_ids, batch_indices)
+            print(f"  batch {batch_start}-{batch_end} ({len(batch_ids)} rows)")
+
+        # ── Update meta (still under lock to keep meta + npy + DB in sync) ────
+        meta["next_index"] = next_idx + total
+        save_meta(meta)
+        print(f"\n  [LOCK] Meta updated: next_index = {meta['next_index']}")
 
     # ── Verify ──────────────────────────────────────────────────────────────
     print("\n[VERIFY] Checking consistency...")
