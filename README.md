@@ -2,7 +2,7 @@
 
 Hermes lightweight memory enhancement system — L0–L3 hierarchical memory with Predictive Coding (V4).
 
-**V5 is live** (2026-05-27). 1637 chunks embedded with bge-m3, tiered thresholds (high≥0.70/medium≥0.65), session dedup, injection format `[自动回忆 - 相似度 X.XX]`.
+**V5.1 is live** (2026-05-27). 1645 chunks embedded with bge-m3, tiered thresholds (high≥0.70/medium≥0.65), session dedup, health + rebuild CLI.
 
 ---
 
@@ -18,6 +18,7 @@ Hermes lightweight memory enhancement system — L0–L3 hierarchical memory wit
 | **V4.4** | **Concurrency Fixes** | Vectorstore double-lock, auto_index file lock, watchdog drift monitor |
 | **V4.5** | **Disposition-Aware Rerank** | Boost L1 facts via disposition context — error_count drives retrieval ranking |
 | **V5** | **Active Retrieval** | bge-m3 vector search in-conversation — automatic memory injection during chat |
+| **V5.1** | **Engineering Fixes** | drift=91 fixed, `hermes memory health` + `rebuild` CLI, embedding automation audit (no gaps found) |
 
 ---
 
@@ -41,7 +42,7 @@ Disposition: (condition, prediction, error_count, success_count)
 Active Memory ← learnings + social learnings fed back to next prompt
 ```
 
-**Current data: 1706 vectors (1637 chunks), 22 dispositions, 80 L2 scenes** (as of 2026-05-27).
+**Current data: 1711 vectors (1645 chunks), 22 dispositions, 80 L2 scenes** (as of 2026-05-27).
 
 ---
 
@@ -101,10 +102,11 @@ Session dedup: same chunk injected at most once
 - `impl/vector_search.py`: bge-m3 cosine similarity + `search_with_tier()`
 - `impl/embedding.py`: Ollama bge-m3 embeddings, SQLite cached
 - `impl/config.py`: all `ACTIVE_RETRIEVAL_*` flags tunable
-- `phase3/scripts/batch_compute_embeddings.py`: precompute all 1637 chunk vectors
+- `phase3/scripts/batch_compute_embeddings.py`: precompute all chunk vectors
 - `phase3/scripts/test_v5_e2e.py`: 7/8 tests passing
+- `plugins/memory/hermem/cli.py`: `hermes memory health` + `hermes memory rebuild`
 
-**Phase B pending:** Medium-confidence accumulation trigger, incremental embedding for new chunks
+**Phase B pending:** Medium-confidence accumulation trigger
 
 ---
 
@@ -238,6 +240,13 @@ python3 phase3/cron_daily.py
 
 ## Changelog
 
+### 2026-05-27 — V5.1 Engineering Fixes
+
+- **drift=91 fixed**: meta and npy fully aligned (1711 vectors, 1645 chunks, 0 orphans)
+- **`hermes memory health`**: CLI check for embedding model, vector drift, chunk count, V5 config, ollama daemon
+- **`hermes memory rebuild`**: Idempotent CLI to repair drift and fill missing embeddings
+- **Embedding automation audit**: All `insert_chunk` call sites verified — no gaps found, no new embedding automation needed
+
 ### 2026-05-27 — V5 Active Retrieval + Public Beta
 
 - **Phase A complete**: bge-m3 vector search + tiered thresholds + injection + session dedup
@@ -269,7 +278,7 @@ python3 phase3/cron_daily.py
 | V4.2 Conditioned Dispositions | ✅ l1_dispositions table + extract/vector_search/three-tier detection |
 | V4.3 Error-Activated Retrieval | ✅ Beta — B1/B2/B4/B5/B6/B8/B9/C3 complete |
 | V4.4 Concurrency Fixes | ✅ P0/P1/P2 complete |
-| **V5 Active Retrieval** | ✅ Phase A — vector search, injection, dedup done. Phase B pending. |
+| **V5 Active Retrieval** | ✅ Phase A — vector search, injection, dedup done. `hermes memory health` + `rebuild` CLI. Phase B pending. |
 | Intent Classifier | ✅ 13 intents + 2-layer architecture |
 | Daily Journal + Synthesis Loop | ✅ Cron 02:00 / 06:00 |
 | C1/C2 gateway hooks | ⚠️ C3 (session-end) active. C1/C2 defined but awaiting Hermes gateway integration. Non-blocking for V5 active retrieval. |
