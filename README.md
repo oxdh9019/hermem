@@ -13,8 +13,9 @@ Hermes lightweight memory enhancement system — L0–L3 hierarchical memory wit
 | **V4.3** | **Error-Activated Retrieval** | Beta — error signal closes the learning loop |
 | **V4.4** | **Concurrency Fixes** | Vectorstore double-lock, auto_index file lock, watchdog drift monitor |
 | **V4.5** | **Disposition-Aware Rerank** | Boost L1 facts via disposition context — error_count now drives retrieval ranking |
+| **V5** | **Active Retrieval** | bge-m3 vector search in-conversation — context-aware memory injection during chat |
 
-> **V4.5 is active** (2026-05-23). 15 Fixes merged — schema complete, SQL injection closed, annotation pipeline end-to-end verified, precise success matching. `disposition_aware_rerank()` boosts L1 fact retrieval via disposition context.
+> **V5 is active** (2026-05-27). 1637 chunks embedded with bge-m3, tiered thresholds (high≥0.70/medium≥0.65), session dedup, injection format `[自动回忆 - 相似度 X.XX]`.
 
 ---
 
@@ -38,7 +39,7 @@ Disposition: (condition, prediction, error_count, success_count)
 Active Memory ← learnings + social learnings fed back to next prompt
 ```
 
-**Current data: 1317 vectors, 22 dispositions (6 model_error + 16 user_behavior), 80 L2 scenes** (as of 2026-05-22).
+**Current data: 1706 vectors (1637 chunks), 22 dispositions, 80 L2 scenes** (as of 2026-05-27).
 
 ---
 
@@ -63,7 +64,7 @@ hermem/                          # Canonical directory — single git clone of h
 │   ├── TODO.md
 │   ├── cron_daily.py           # Daily pipeline entry (journal 02:00 + synthesis 06:00)
 │   │
-│   ├── impl/                   # ← All active implementation (V1–V4)
+│   ├── impl/                   # ← All active implementation (V1–V5)
 │   │   ├── __init__.py
 │   │   ├── config.py           # Config: model names, paths, constants
 │   │   ├── utils.py            # LLM calls, embeddings, serialization
@@ -79,6 +80,7 @@ hermem/                          # Canonical directory — single git clone of h
 │   │   ├── vectorstore.py      # Vector storage (npy): double-lock append_vectors
 │   │   ├── retrieval.py        # Semantic + keyword + hybrid search
 │   │   ├── embedding.py       # Ollama bge-m3 embeddings
+│   │   ├── vector_search.py    # V5: bge-m3 cosine similarity + search_with_tier()
 │   │   ├── verify_annotation.py  # Annotation quality audit
 │   │   ├── async_annotation.py   # Async annotation queue
 │   │   ├── batch_extract.py   # Batch L1 extraction
@@ -103,7 +105,10 @@ hermem/                          # Canonical directory — single git clone of h
 │   │   ├── process_turn_judgments.py # V4.4 per-turn judgment processor
 │   │   ├── generate_dispositions_from_annotations.py  # V4.3 seed dispositions
 │   │   ├── backfill_vectors.py       # Vector backfill helper
-│   │   └── rebuild_vectorstore.py     # Compact + remap rebuild tool
+│   │   ├── rebuild_vectorstore.py     # Compact + remap rebuild tool
+│   │   ├── batch_compute_embeddings.py  # V5: precompute all chunk embeddings
+│   │   ├── fix_drift_and_fill_embeddings.py  # V5: drift fix + embedding backfill
+│   │   └── test_v5_e2e.py             # V5: end-to-end tests (7/8 passing)
 │   │
 │   ├── eval/                   # Evaluation scripts
 │   │   ├── eval_compare.py            # Model comparison eval
@@ -216,7 +221,7 @@ V4.3 completes the error-driven learning loop. **End-to-end annotation pipeline 
 
 ### V4.5 — Disposition-Aware Rerank (2026-05-22)
 
-V4.5 closes the error_count → behavior loop. `disposition_aware_rerank()` boosts L1 facts that share context with top dispositions, so dispositions don't just accumulate error_count — they actively rerank what Hermem retrieves.
+|V4.5 closes the error_count → behavior loop. `disposition_aware_rerank()` boosts L1 facts that share context with top dispositions, so dispositions don't just accumulate error_count — they actively rerank what Hermem retrieves.
 
 **Boost paths:**
 1. `l0_ref` exact match — disposition and fact from the same session (precision path)
@@ -233,6 +238,41 @@ disposition_aware_rerank(l1_results, dispositions, query=query, boost_factor=1.5
 - Analyzable with: `jq 'select(.query | contains("..."))' ~/.hermes/logs/hermem-boost.jsonl`
 
 **Schema note:** `l1_dispositions.l0_ref` (UUID) ≠ `l1_facts.l0_ref` (l0_YYYYMMDD_HHMMSS). Only dispositions created after 2026-05-18 have matching L0 refs. Path 2 (keyword fallback) covers the rest.
+
+### V5 — Active Retrieval (2026-05-27)
+
+V5 brings **in-conversation memory retrieval** — Hermem proactively searches semantic memory during chat and injects relevant past context without waiting for the user to ask.
+
+**How it works:**
+```
+User message
+    ↓
+Every N turns (frequency=3): vector search
+    ↓
+Tiered threshold check:
+  high (≥0.70): inject immediately via [自动回忆 - 相似度 X.XX]
+  medium (0.65–0.70): cache, promote if seen again
+  low (<0.65): ignore
+    ↓
+Session dedup: same chunk injected at most once per session
+```
+
+**Key components:**
+- `impl/vector_search.py`: bge-m3 cosine similarity search + `search_with_tier()`
+- `impl/embedding.py`: Ollama bge-m3 embeddings, cached in SQLite
+- `impl/config.py`: `ACTIVE_RETRIEVAL_*` flags + thresholds (all tunable)
+- `phase3/scripts/batch_compute_embeddings.py`: precompute all 1637 chunk vectors
+- `phase3/scripts/test_v5_e2e.py`: 7/8 tests passing
+
+**Thresholds (tuned 2026-05-27):**
+- HIGH: 0.70 (实测最高相似度 0.77，0.85 无法命中)
+- MEDIUM: 0.65
+- TOP_K: 3 per turn
+- FREQUENCY: every 3 turns
+
+**Pending (Phase B):**
+- Medium-confidence accumulation trigger: promote cached chunk when similarity rises above HIGH threshold
+- Incremental embedding for new chunks (Step 1b)
 
 ### V4.4 — Concurrency Fixes (2026-05-21)
 
@@ -266,6 +306,18 @@ python3 phase3/cron_daily.py
 ---
 
 ## Changelog
+
+### 2026-05-27 — V5 Active Retrieval
+
+**`origin/main` → `a11f73f`**:
+
+- **Phase A complete**: bge-m3 vector search + tiered thresholds + injection format + session dedup
+- `impl/vector_search.py`: cosine similarity with `search_with_tier()` (high/medium/low tiers)
+- `impl/embedding.py`: bge-m3 Ollama embeddings, SQLite cached
+- `Hermem-V5-SPEC.md` + `phase3/v5/SPEC.md`: full specification documents
+- `phase3/scripts/batch_compute_embeddings.py`: precompute all 1637 chunk embeddings (drift=0)
+- `phase3/scripts/test_v5_e2e.py`: 7/8 tests passing
+- HIGH threshold: 0.85 → 0.70 (实测最高 0.77，0.85 无法命中)
 
 ### 2026-05-23 — V4.5 Patch (15 Fixes)
 
@@ -329,7 +381,7 @@ python3 phase3/cron_daily.py
 | V4.2 Conditioned Dispositions | ✅ l1_dispositions table, extract/vector_search/three-tier detection |
 | V4.3 Error-Activated Retrieval | ✅ Beta (v4.3.0-beta) — B1/B2/B4/B5/B6/B8/B9/C3 complete |
 | **V4.4 Concurrency Fixes** | ✅ P0/P1/P2 complete |
-| **V4.5 Disposition-Aware Rerank** | ✅ Boost log active — `~/.hermes/logs/hermem-boost.jsonl` |
+| **V5 Active Retrieval** | ✅ Phase A — vector search, injection, dedup. Phase B pending (medium accumulation, incremental embedding). |
 | Intent Classifier (B2) | ✅ 13 intents + 2-layer architecture |
 | Daily Journal + Synthesis Loop | ✅ Cron at 02:00 / 06:00 |
 | C1/C2 gateway hooks | ⚠️ Defined but not called by Hermes gateway yet |
