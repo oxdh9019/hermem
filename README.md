@@ -399,11 +399,10 @@ python3 phase3/cron_daily.py
 
 ## Outstanding Issues
 
-||| Issue | Notes | Revisit After |
-|-------|-------|---------------|
-| **B3 is_recurring_cross_session** | Dynamic threshold blocked — success_count=0 from annotation-only data. B3 bypass via satisfaction check (V4.4 Plan B) — no dynamic threshold needed yet. | More satisfaction check data |
-| **V4.5 keyword threshold tuning** | `MIN_HITS=2` is conservative. After 1-2 weeks of boost log data, tighten to `max(2, ceil(n_keywords*0.4))` or add `trigger_keywords` field. | Boost log analysis |
-| **Fix 6 annotation pipeline** | Precise success matching via `active_disposition_ids` — V4.5 end-to-end now verified. | Live data validation |
+|||| Issue | Notes | Revisit After |
+||-------|-------|---------------|
+|| **B3 is_recurring_cross_session** | Dynamic threshold 未实现（被 V4.4 Plan B satisfaction check 绕过，但未完全关闭动态阈值通路）。目前依赖硬编码阈值。 | More satisfaction check data |
+|| **V4.5 keyword threshold tuning** | `MIN_HITS=2` 保守。等 boost log 积累 1-2 周后调紧到 `max(2, ceil(n_keywords*0.4))`。 | Boost log analysis |
 
 ## Caveats
 
