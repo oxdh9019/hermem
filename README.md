@@ -51,6 +51,14 @@ hermem/                          # Canonical directory — single git clone of h
 ├── README.md                    # This file
 ├── PROJECT.md                   # Three-phase plan overview + version changelog
 │
+├── QUICKSTART.md               # 5-minute install guide for Hermes users
+├── TROUBLESHOOTING.md         # 10 common issues + fixes
+├── install.sh                  # Auto-configures plugin directory + impl symlink
+├── requirements.txt           # Minimal deps (ollama, numpy, pydantic)
+│
+├── templates/
+│   └── __init__.py            # Hermes plugin entry with friendly import errors
+│
 ├── phase1/                      # Phase 1 design documents only
 │   ├── SPEC.md
 │   └── REVIEW.md
@@ -292,6 +300,31 @@ Session dedup: same chunk injected at most once per session
 
 ## Quick Start
 
+### For Hermes Agent Users (5-minute install)
+
+```bash
+# 1. Clone Hermem
+git clone https://github.com/oxdh9019/hermem.git ~/hermem
+
+# 2. Run the installer (auto-configures plugin directory + symlink)
+cd ~/hermem && ./install.sh
+
+# 3. Initialize the vector store (first time only, ~5 min)
+python3 ~/hermem/phase3/scripts/batch_compute_embeddings.py
+
+# 4. Configure Hermes to use Hermem
+# Add to ~/.hermes/config.yaml:
+#   memory:
+#     provider: hermem
+
+# 5. Restart Hermes
+hermes restart
+```
+
+Full guide: [QUICKSTART.md](QUICKSTART.md) · Troubleshooting: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+
+### For Developers (self-host)
+
 ```bash
 git clone https://github.com/oxdh9019/hermem.git
 cd hermem
@@ -307,9 +340,9 @@ python3 phase3/cron_daily.py
 
 ## Changelog
 
-### 2026-05-27 — V5 Active Retrieval
+### 2026-05-27 — V5 Active Retrieval + Public Beta
 
-**`origin/main` → `a11f73f`**:
+**`origin/main` → `0ccda82`**:
 
 - **Phase A complete**: bge-m3 vector search + tiered thresholds + injection format + session dedup
 - `impl/vector_search.py`: cosine similarity with `search_with_tier()` (high/medium/low tiers)
@@ -318,6 +351,7 @@ python3 phase3/cron_daily.py
 - `phase3/scripts/batch_compute_embeddings.py`: precompute all 1637 chunk embeddings (drift=0)
 - `phase3/scripts/test_v5_e2e.py`: 7/8 tests passing
 - HIGH threshold: 0.85 → 0.70 (实测最高 0.77，0.85 无法命中)
+- **Public beta release kit**: `install.sh` + `QUICKSTART.md` + `TROUBLESHOOTING.md` + `requirements.txt` + `templates/__init__.py`
 
 ### 2026-05-23 — V4.5 Patch (15 Fixes)
 
