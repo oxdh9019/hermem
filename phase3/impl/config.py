@@ -317,7 +317,7 @@ DISPOSITION_EXTRACT_PROMPT = """你是一个记忆倾向分析器。基于以下
 # ── V5: Active Retrieval（对话中主动检索）────────────────────────
 # 向量检索开关与阈值
 ACTIVE_RETRIEVAL_ENABLED = True
-ACTIVE_RETRIEVAL_THRESHOLD_HIGH = 0.85  # 高置信：直接注入
+ACTIVE_RETRIEVAL_THRESHOLD_HIGH = 0.70  # 高置信：直接注入（实测最高相似度 0.77，0.85 阈值无法命中）
 ACTIVE_RETRIEVAL_THRESHOLD_MEDIUM = 0.65  # 中置信：缓存记录
 ACTIVE_RETRIEVAL_TOP_K = 3  # 每次最多注入 3 条
 ACTIVE_RETRIEVAL_FREQUENCY = 3  # 每 N 条消息触发一次（0=禁用）
