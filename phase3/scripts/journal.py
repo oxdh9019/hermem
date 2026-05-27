@@ -208,7 +208,7 @@ def call_llm(prompt: str) -> dict:
     payload = {
         "model": LLM_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 8192,
+        "max_tokens": 16384,
         "temperature": 0.7,
         "no_think": True,
     }

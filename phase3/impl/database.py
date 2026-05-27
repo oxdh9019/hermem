@@ -152,6 +152,15 @@ def get_chunk_by_id(chunk_id: int) -> dict | None:
         return _row_to_dict(row)
 
 
+def get_chunk_by_vec_index(vec_index: int) -> dict | None:
+    """根据 vec_index（npy 行索引）查询 chunk。"""
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM chunks WHERE vec_index = ?", (vec_index,)).fetchone()
+        if row is None:
+            return None
+        return _row_to_dict(row)
+
+
 def get_chunks_by_session(session_id: str) -> list[dict]:
     """获取某个会话的所有记忆片段。"""
     with get_db() as conn:

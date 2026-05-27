@@ -226,8 +226,12 @@ def cosine_topk(
 
     # 向量化余弦计算
     dots = vectors @ q
-    norms = np.linalg.norm(vectors, axis=1) * (np.linalg.norm(q) + 1e-8)
-    scores = dots / norms
+    q_norm = np.linalg.norm(q)
+    vector_norms = np.linalg.norm(vectors, axis=1)
+    # 零范向量 → nan → 用 where 置为 -inf（排到底部）
+    with np.errstate(invalid="ignore"):
+        scores = dots / (vector_norms * (q_norm + 1e-8))
+    scores = np.where(np.isfinite(scores), scores, -np.inf)
 
     # 排除
     if exclude_indices:

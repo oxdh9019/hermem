@@ -277,7 +277,7 @@ L1_EXTRACT_PROMPT = """你是一个记忆分析器。从以下会话摘要中提
 ]}}"""
 
 
-# ── V4.2: Conditioned Dispositions ─────────────────────────
+# ── V4.5: Conditioned Dispositions ─────────────────────────
 DISPOSITION_EXTRACT_PROMPT = """你是一个记忆倾向分析器。基于以下对话摘要，识别用户（Oliver）行为的条件-预测对。
 
 对话摘要：
@@ -313,3 +313,13 @@ DISPOSITION_EXTRACT_PROMPT = """你是一个记忆倾向分析器。基于以下
 - confidence 基于证据强度：直接引用 Oliver 原话=0.9-1.0，有明确暗示=0.7-0.85，模糊推断=0.5-0.65
 - confidence < 0.6 的不要输出
 - 如果没有明确的条件-预测对，输出空数组 []"""
+
+# ── V5: Active Retrieval（对话中主动检索）────────────────────────
+# 向量检索开关与阈值
+ACTIVE_RETRIEVAL_ENABLED = True
+ACTIVE_RETRIEVAL_THRESHOLD_HIGH = 0.85  # 高置信：直接注入
+ACTIVE_RETRIEVAL_THRESHOLD_MEDIUM = 0.65  # 中置信：缓存记录
+ACTIVE_RETRIEVAL_TOP_K = 3  # 每次最多注入 3 条
+ACTIVE_RETRIEVAL_FREQUENCY = 3  # 每 N 条消息触发一次（0=禁用）
+EMBEDDING_MODEL = "bge-m3:latest"  # 向量模型（复用现有 EMBED_MODEL）
+BATCH_SIZE = 32  # 批量 embedding 尺寸
