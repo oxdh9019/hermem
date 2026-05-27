@@ -19,6 +19,7 @@ Hermes lightweight memory enhancement system — L0–L3 hierarchical memory wit
 | **V4.5** | **Disposition-Aware Rerank** | Boost L1 facts via disposition context — error_count drives retrieval ranking |
 | **V5** | **Active Retrieval** | bge-m3 vector search in-conversation — automatic memory injection during chat |
 | **V5.1** | **Engineering Fixes** | drift=91 fixed, `hermes memory health` + `rebuild` CLI, embedding automation audit (no gaps found) |
+| **V5.5** | **Meta-Cognition + Conflict + Forgetting** | L4 reflection cron, memory conflict negotiation, biologically-inspired active forgetting |
 
 ---
 
@@ -74,9 +75,11 @@ hermem/
 
 ---
 
-## V5 — Active Retrieval (2026-05-27)
+## V5 — Active Retrieval (2026-05-27 → V5.5)
 
 V5 brings **in-conversation memory retrieval** — Hermem proactively searches semantic memory and auto-injects relevant past context without waiting for the user to ask.
+
+V5.1 (2026-05-27) added engineering fixes. V5.5 (2026-05-28) adds meta-cognition, conflict negotiation, and biologically-inspired active forgetting.
 
 **How it works:**
 ```
@@ -107,6 +110,56 @@ Session dedup: same chunk injected at most once
 - `plugins/memory/hermem/cli.py`: `hermes memory health` + `hermes memory rebuild`
 
 **Phase B pending:** Medium-confidence accumulation trigger
+
+---
+
+## V5.5 — Meta-Cognition, Conflict & Forgetting (2026-05-28)
+
+V5.5 adds three higher-order memory functions:
+
+### L4 Reflection (Meta-Cognition)
+
+Daily cron (02:00) reads previous day's `prediction_errors`, uses LLM to synthesize meta-memory about user interaction patterns. Written to `l4_reflections` table with 14-day TTL.
+
+**Key components:**
+- `v5.5/impl/l4_reflection.py`: Core synthesis logic
+- `v5.5/impl/llm_helper.py`: Unified LLM entry with MiniMax-M2.7 primary + qwen2.5:3b fallback
+- `v5.5/cron/cron_weekly_synthesis.py`: Combined weekly job (L4 + consolidation)
+
+### Memory Conflict Negotiation
+
+When L1 fact is persisted, detects conflicts against high-confidence dispositions (similarity > 0.75 + semantic contradiction). Writes to `pending_conflicts` table and generates user prompt.
+
+**Key components:**
+- `v5.5/impl/conflict_resolver.py`: detect_conflicts + resolve_conflict_with_action
+
+### Biologically-Inspired Active Forgetting
+
+- **Sleep consolidation** (weekly):高频召回(usage_count > 5, last_used_at ≥ 7天) → LLM归纳 → user_profile.md
+- **Active demotion** (weekly): 30天未召回且confidence < 0.6 → 归档
+
+**Usage tracking:** `impl/usage_tracker.py` updates `usage_count`/`last_used_at` asynchronously on each retrieve() call.
+
+### Database Changes
+
+```
+hermem.db:
+  l4_reflections        — L4 reflection meta-memory
+  pending_conflicts     — conflict negotiation queue
+  chunks: usage_count, last_used_at
+
+l0_l3.db:
+  l1_dispositions: archived, last_used_at, usage_count
+```
+
+### Cron Jobs
+
+```bash
+# Weekly (Sunday 02:30) — L4 reflection + sleep consolidation + demotion
+hermes cron create "30 2 * * 0" \
+  --name "Weekly Memory Synthesis" \
+  --script "phase3/v5.5/cron/cron_weekly_synthesis.py"
+```
 
 ---
 
@@ -247,6 +300,17 @@ python3 phase3/cron_daily.py
 - **`hermes memory rebuild`**: Idempotent CLI to repair drift and fill missing embeddings
 - **Embedding automation audit**: All `insert_chunk` call sites verified — no gaps found, no new embedding automation needed
 
+### 2026-05-28 — V5.5 Meta-Cognition + Conflict + Forgetting
+
+- **`v5.5/impl/llm_helper.py`**: Unified LLM entry with MiniMax-M2.7 primary + qwen2.5:3b fallback
+- **`v5.5/impl/l4_reflection.py`**: L4 reflection synthesis from prediction_errors, 14-day TTL
+- **`v5.5/impl/conflict_resolver.py`**: Memory conflict detection (similarity > 0.75 + semantic contradiction) + resolve_conflict_with_action
+- **`v5.5/impl/active_forgetting.py`**: Sleep consolidation + active demotion with confidence filtering
+- **`v5.5/cron/cron_weekly_synthesis.py`**: Combined weekly job (L4 + consolidation + demotion)
+- **`v5.5/migrate_v55.py`**: Database migration for hermem.db + l0_l3.db (l4_reflections, pending_conflicts, usage columns)
+- **`phase3/impl/usage_tracker.py`**: Async usage_count/last_used_at updates on retrieve() calls
+- All 7 unit tests passing
+
 ### 2026-05-27 — V5 Active Retrieval + Public Beta
 
 - **Phase A complete**: bge-m3 vector search + tiered thresholds + injection + session dedup
@@ -279,6 +343,7 @@ python3 phase3/cron_daily.py
 | V4.3 Error-Activated Retrieval | ✅ Beta — B1/B2/B4/B5/B6/B8/B9/C3 complete |
 | V4.4 Concurrency Fixes | ✅ P0/P1/P2 complete |
 | **V5 Active Retrieval** | ✅ Phase A — vector search, injection, dedup done. `hermes memory health` + `rebuild` CLI. Phase B pending. |
+| **V5.5 Meta-Cognition** | ✅ L4 reflection cron + LLM fallback + 14-day TTL |
 | Intent Classifier | ✅ 13 intents + 2-layer architecture |
 | Daily Journal + Synthesis Loop | ✅ Cron 02:00 / 06:00 |
 | C1/C2 gateway hooks | ⚠️ C3 (session-end) active. C1/C2 defined but awaiting Hermes gateway integration. Non-blocking for V5 active retrieval. |

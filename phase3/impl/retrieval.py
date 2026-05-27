@@ -9,9 +9,11 @@
 
 import json
 import logging
+import threading
 from typing import Optional
 
 from . import database, embedding, vectorstore
+from .usage_tracker import update_chunks_usage_async
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +95,16 @@ def semantic_search(
 
         rows_sorted = [r for r in rows_sorted if concepts_include(r["concepts"], concept_filter)]
 
+    # 6. 异步更新命中的 chunks 的 usage_count（不阻塞返回）
+    if rows_sorted:
+        chunk_ids = [r["id"] for r in rows_sorted[:top_k] if r.get("id")]
+        if chunk_ids:
+            threading.Thread(
+                target=update_chunks_usage_async,
+                args=(chunk_ids,),
+                daemon=True,
+            ).start()
+
     return rows_sorted[:top_k]
 
 
@@ -141,6 +153,16 @@ def keyword_search(
 
     with database.get_db() as conn:
         rows = list(conn.execute(sql, params))
+
+    # 异步更新命中的 chunks 的 usage_count
+    if rows:
+        chunk_ids = [r["id"] for r in rows[:top_k] if r.get("id")]
+        if chunk_ids:
+            threading.Thread(
+                target=update_chunks_usage_async,
+                args=(chunk_ids,),
+                daemon=True,
+            ).start()
 
     return rows
 
