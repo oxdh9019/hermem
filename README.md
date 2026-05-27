@@ -417,8 +417,8 @@ python3 phase3/cron_daily.py
 | **V5 Active Retrieval** | ✅ Phase A — vector search, injection, dedup. Phase B pending (medium accumulation, incremental embedding). |
 | Intent Classifier (B2) | ✅ 13 intents + 2-layer architecture |
 | Daily Journal + Synthesis Loop | ✅ Cron at 02:00 / 06:00 |
-| C1/C2 gateway hooks | ⚠️ Defined but not called by Hermes gateway yet |
-| Unit tests | ⚠️ 116 passed, 3 failed (intent_classifier trigger gaps — pre-existing) |
+| C1/C2 gateway hooks | ⚠️ C3 (session-end) active. C1 (LLM error) + C2 (tool error) hooks defined in Hermem but not yet called by Hermes gateway. Error-driven learning works via C3; C1/C2 await gateway integration. Non-blocking for V5 active retrieval. |
+| Unit tests | ⚠️ 116 passed, 3 failed (intent_classifier trigger edge cases — pre-existing gaps unrelated to V5 active retrieval). Not blocking for beta release. |
 | CI/CD | ❌ None |
 
 ---
