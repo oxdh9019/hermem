@@ -23,7 +23,7 @@ from pathlib import Path
 # ── 路径设置 ───────────────────────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent
 IMPL_DIR = SCRIPT_DIR.parent / "impl"  # v5.5/impl/
-sys.path.insert(0, str(IMPL_DIR))       # → v5.5/impl/（含 llm_helper, active_forgetting）
+sys.path.insert(0, str(IMPL_DIR))  # → v5.5/impl/（含 llm_helper, active_forgetting）
 sys.path.insert(0, str(IMPL_DIR.parent))  # → v5.5/（兼容 phase3/impl 等）
 # WORKDIR already set to phase3 by Hermes cron runner
 
@@ -135,6 +135,7 @@ def cleanup_expired_l4() -> int:
     """删除已过期的 l4_reflections 记录。返回删除数量。"""
     HERMEM_DB = Path.home() / ".hermes" / "memory" / "hermem.db"
     import sqlite3
+
     conn = sqlite3.connect(str(HERMEM_DB))
     try:
         cur = conn.execute(

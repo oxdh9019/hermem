@@ -26,7 +26,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from impl.config import DB_PATH
-from impl.utils import get_embeddings_batch, json_dumps, llm_generate_ollama, llm_generate, serialize_vec
+from impl.utils import (
+    get_embeddings_batch,
+    json_dumps,
+    llm_generate,
+    llm_generate_ollama,
+    serialize_vec,
+)
 
 # ── Fact extraction prompt（单轮版本）──────────────────────────────────────────
 
