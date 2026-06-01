@@ -11,6 +11,7 @@ import threading
 from datetime import datetime as _dt
 
 from .config import DB_PATH
+from .usage_tracker import update_l1_facts_usage_async
 from .utils import (
     cosine_sim,
     db_query_dict,
@@ -429,6 +430,16 @@ def retrieve(
         l1_results = [r for r, _ in scored[:top_k]]
     else:
         l1_results = l1_results[:top_k]
+
+    # V5.5: 异步更新命中的 l1_facts 的 usage_count / last_used_at（不阻塞返回）
+    if l1_results:
+        fact_ids = [r["id"] for r in l1_results if r.get("id")]
+        if fact_ids:
+            threading.Thread(
+                target=update_l1_facts_usage_async,
+                args=(fact_ids,),
+                daemon=True,
+            ).start()
 
     return {
         "facts": l1_results,

@@ -65,7 +65,7 @@ def sleep_consolidation() -> dict:
             FROM l1_facts
             WHERE usage_count > ?
               AND last_used_at IS NOT NULL
-              AND last_used_at >= julianday('now', '-? days')
+              AND last_used_at >= julianday('now', '-' || CAST(? AS TEXT) || ' days')
             ORDER BY usage_count DESC
             LIMIT 20
         """,
@@ -134,7 +134,7 @@ def active_demotion(min_confidence: float = DEMOTION_MIN_CONFIDENCE) -> dict:
             FROM l1_dispositions
             WHERE is_active = 1
               AND confidence < ?
-              AND (last_used_at IS NULL OR last_used_at < julianday('now', '-? days'))
+              AND (last_used_at IS NULL OR last_used_at < julianday('now', '-' || CAST(? AS TEXT) || ' days'))
         """,
             (min_confidence, DEMOTION_DAYS),
         ).fetchall()
@@ -144,7 +144,10 @@ def active_demotion(min_confidence: float = DEMOTION_MIN_CONFIDENCE) -> dict:
 
         ids = [r["id"] for r in rows]
         placeholders = ",".join(["?"] * len(ids))
-        conn.execute(f"UPDATE l1_dispositions SET is_active = 0 WHERE id IN ({placeholders})", ids)
+        conn.execute(
+            f"UPDATE l1_dispositions SET is_active = 0, archived = 1 WHERE id IN ({placeholders})",
+            ids,
+        )
         conn.commit()
         return {"demoted": len(ids), "ids": ids}
 

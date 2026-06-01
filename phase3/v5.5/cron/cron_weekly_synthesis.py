@@ -22,8 +22,10 @@ from pathlib import Path
 
 # ── 路径设置 ───────────────────────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent
-IMPL_DIR = SCRIPT_DIR.parent / "impl"
-sys.path.insert(0, str(IMPL_DIR.parent))
+IMPL_DIR = SCRIPT_DIR.parent / "impl"  # v5.5/impl/
+sys.path.insert(0, str(IMPL_DIR))       # → v5.5/impl/（含 llm_helper, active_forgetting）
+sys.path.insert(0, str(IMPL_DIR.parent))  # → v5.5/（兼容 phase3/impl 等）
+# WORKDIR already set to phase3 by Hermes cron runner
 
 
 # ── 主函数 ─────────────────────────────────────────────────────────────────────
@@ -75,19 +77,20 @@ def get_weekly_data():
 
 
 def synthesize_weekly():
-    """综合归纳：errors → 元记忆；facts → 用户画像；demotion → 归档"""
+    """综合归纳：errors → 元记忆；facts → 用户画像；demotion → 归档
+
+    注意：sleep consolidation 和 active demotion 已迁移到 active_forgetting.py。
+    本函数仅处理 L4 reflection（Part 1），其他两部分由 active_forgetting.run_consolidation() 接管。
+    """
     from impl.llm_helper import call_llm_with_fallback
 
     HERMEM_DB = Path.home() / ".hermes" / "memory" / "hermem.db"
     L0L3_DB = Path.home() / ".hermes" / "memory" / "l0_l3.db"
-    USER_PROFILE_PATH = Path.home() / ".hermes" / "memory" / "user_profile.md"
-
-    import sqlite3
 
     result = {}
 
     # ── Part 1: L4 反思（元记忆）─────────────────────────────────────────────
-    errors, facts = get_weekly_data()
+    errors, _ = get_weekly_data()
 
     if len(errors) >= 3:
         error_text = "\n".join(
@@ -105,6 +108,8 @@ def synthesize_weekly():
 
         reflection = call_llm_with_fallback(prompt, max_tokens=200)
         if reflection:
+            import sqlite3
+
             conn_h = sqlite3.connect(str(HERMEM_DB))
             conn_h.row_factory = sqlite3.Row
             try:
@@ -123,72 +128,47 @@ def synthesize_weekly():
     else:
         result["reflection"] = None
 
-    # ── Part 2: 睡眠巩固（用户画像）─────────────────────────────────────────
-    if facts:
-        fact_text = "\n".join([f"- {f['content']}" for f in facts])
-        prompt = f"""从以下高频事实归纳用户偏好。不超过80字，直接描述。
-
-高频事实：
-{fact_text}
-
-用户画像（不超过80字）："""
-
-        profile = call_llm_with_fallback(prompt, max_tokens=150)
-        if profile:
-            profile_text = profile.strip()[:80]
-            try:
-                USER_PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-                with open(USER_PROFILE_PATH, "a", encoding="utf-8") as fh:
-                    fh.write(f"\n---\n{profile_text}\n")
-            except Exception:
-                pass
-
-            # 标记已提升
-            conn_l = sqlite3.connect(str(L0L3_DB))
-            try:
-                ids = [f["id"] for f in facts]
-                placeholders = ",".join(["?"] * len(ids))
-                conn_l.execute(
-                    f"UPDATE l1_facts SET status = 'promoted' WHERE id IN ({placeholders})", ids
-                )
-                conn_l.commit()
-            finally:
-                conn_l.close()
-            result["profile"] = profile_text
-
-    # ── Part 3: 主动降级 ────────────────────────────────────────────────────
-    conn_l = sqlite3.connect(str(L0L3_DB))
-    conn_l.row_factory = sqlite3.Row
-    try:
-        rows = conn_l.execute("""
-            SELECT id FROM l1_dispositions
-            WHERE is_active = 1
-              AND confidence < 0.6
-              AND (last_used_at IS NULL OR last_used_at < julianday('now', '-30 days'))
-        """).fetchall()
-        if rows:
-            ids = [r["id"] for r in rows]
-            placeholders = ",".join(["?"] * len(ids))
-            conn_l.execute(
-                f"UPDATE l1_dispositions SET is_active = 0 WHERE id IN ({placeholders})", ids
-            )
-            conn_l.commit()
-            result["demotion"] = len(ids)
-        else:
-            result["demotion"] = 0
-    finally:
-        conn_l.close()
-
     return result
 
 
-def main():
-    print("[V5.5 Weekly Synthesis] 开始执行...")
-    errors, facts = get_weekly_data()
-    print(f"本周: {len(errors)} 条 errors, {len(facts)} 条高频 facts")
+def cleanup_expired_l4() -> int:
+    """删除已过期的 l4_reflections 记录。返回删除数量。"""
+    HERMEM_DB = Path.home() / ".hermes" / "memory" / "hermem.db"
+    import sqlite3
+    conn = sqlite3.connect(str(HERMEM_DB))
+    try:
+        cur = conn.execute(
+            "DELETE FROM l4_reflections WHERE expires_at IS NOT NULL AND expires_at < julianday('now')"
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
 
+
+def main():
+    # 先清理过期 L4 reflections
+    cleaned = cleanup_expired_l4()
+    print(f"[V5.5 Weekly Synthesis] 清理了 {cleaned} 条过期 L4 reflections")
+
+    print("[V5.5 Weekly Synthesis] 开始执行...")
+
+    # Part 1: L4 reflection
     result = synthesize_weekly()
-    print(f"综合归纳结果: {result}")
+    print(f"L4 reflection 结果: {result}")
+
+    # Part 2 & 3: sleep consolidation + active demotion（由 active_forgetting 模块处理）
+    try:
+        from impl.active_forgetting import run_consolidation
+
+        consolidation = run_consolidation()
+        print(f"Sleep consolidation: {consolidation['sleep']}")
+        print(f"Active demotion: {consolidation['demotion']}")
+        result.update(consolidation)
+    except Exception as e:
+        print(f"[V5.5 Weekly Synthesis] active_forgetting 调用失败: {e}")
+
+    print(f"综合归纳最终结果: {result}")
     return result
 
 

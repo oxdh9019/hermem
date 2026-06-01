@@ -18,7 +18,7 @@ hermem/
 ├── phase3/impl/           # ← All active implementation
 │   ├── database.py        # hermem.db + l0_l3.db (WAL mode, thread-safe)
 │   ├── vectorstore.py      # NumPy vector store (double-lock: threading.Lock + fcntl.flock)
-│   ├── vector_search.py   # bge-m3 cosine similarity + tiered thresholds (HIGH≥0.70, MEDIUM≥0.65)
+│   ├── vector_search.py   # bge-m3 cosine similarity + tiered thresholds (HIGH≥0.70, MEDIUM≥0.50)
 │   ├── embedding.py       # Ollama bge-m3 embeddings, SQLite cached
 │   ├── intent_classifier.py # 13-intent classification
 │   ├── disposition_updater.py # disposition (condition, prediction, error_count) update logic
@@ -118,7 +118,7 @@ hermes cron create "30 2 * * 0" --name "Weekly Memory Synthesis" \
 
 All tuning constants live in `phase3/impl/config.py`:
 - `ACTIVE_RETRIEVAL_HIGH_THRESHOLD = 0.70`
-- `ACTIVE_RETRIEVAL_MEDIUM_THRESHOLD = 0.65`
+- `ACTIVE_RETRIEVAL_MEDIUM_THRESHOLD = 0.50`
 - `ACTIVE_RETRIEVAL_TOP_K = 3`
 - `ACTIVE_RETRIEVAL_FREQUENCY = 3` (every N turns)
 - `DISPOSITION_HALF_LIFE_DAYS = 7`

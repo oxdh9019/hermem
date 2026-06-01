@@ -81,7 +81,7 @@ def llm_generate_ollama(
     resp = _requests.post(
         f"{base_url}/api/chat",
         json=payload,
-        timeout=180,
+        timeout=600,  # 10min timeout for Chinese text generation with qwen3.5
         headers={"Content-Type": "application/json"},
     )
     resp.raise_for_status()

@@ -37,7 +37,7 @@ Hermem 只在 session warmup 时注入一次，对话过程中完全被动。
     ↓
 Hermem 主动检索（embedding 匹配）
     ↓
-分层阈值判断（≥0.85 直接注入，0.65-0.85 缓存记录）
+分层阈值判断（≥0.70 直接注入，0.50-0.70 缓存记录）
     ↓
 相关 chunk 追加到上下文
     ↓
@@ -78,18 +78,18 @@ Agent 处理（含历史上下文）→ 响应
 
 | 层级 | 相似度范围 | 动作 | 说明 |
 |------|------------|------|------|
-| 高置信 | ≥ 0.85 | 直接注入 | 高度相关，直接追加到上下文 |
-| 中置信 | 0.65 ≤ x < 0.85 | 缓存记录 | 暂不注入，记录到日志；后续消息相似度提升则注入 |
-| 低置信 | < 0.65 | 忽略 | 不注入 |
+| 高置信 | ≥ 0.70 | 直接注入 | 高度相关，直接追加到上下文（bge-m3 实测分布调整，原 0.85 不可达） |
+| 中置信 | 0.50 ≤ x < 0.70 | 缓存记录 | 暂不注入，记录到日志；后续消息相似度提升则注入 |
+| 低置信 | < 0.50 | 忽略 | 不注入 |
 
 ### 配置化
 
 ```python
 # config.py
-ACTIVE_RETRIEVAL_THRESHOLD = 0.85       # 高置信注入阈值
-ACTIVE_RETRIEVAL_MEDIUM = 0.65         # 中置信阈值
-ACTIVE_RETRIEVAL_ENABLED = True        # 可开关
-ACTIVE_RETRIEVAL_TOP_K = 3             # 每次最多注入 3 条
+ACTIVE_RETRIEVAL_THRESHOLD_HIGH = 0.70       # 高置信注入阈值（bge-m3 实测分布调整）
+ACTIVE_RETRIEVAL_THRESHOLD_MEDIUM = 0.50      # 中置信阈值（原 0.65 偏高，截断边缘候选）
+ACTIVE_RETRIEVAL_ENABLED = True              # 可开关
+ACTIVE_RETRIEVAL_TOP_K = 3                   # 每次最多注入 3 条
 ```
 
 ---
@@ -127,7 +127,7 @@ ACTIVE_RETRIEVAL_TOP_K = 3             # 每次最多注入 3 条
 def hermem_search_vector(
     query_embedding: np.ndarray,  # bge 生成的 1024 维向量
     top_k: int = 5,
-    threshold: float = 0.65  # 中置信阈值，低于此直接跳过
+    threshold: float = 0.50  # 中置信阈值，低于此直接跳过
 ) -> list[dict]:
     """
     向量检索，返回相似度 ≥ threshold 的 chunk，按相似度降序。
@@ -150,13 +150,12 @@ def hermem_search_vector(
     ↓
 用 bge 生成 query_embedding（30-80ms CPU）
     ↓
-hermem_search_vector(query_emb, top_k=3, threshold=0.65)
+hermem_search_vector(query_emb, top_k=3, threshold=0.50)
     ↓
-遍历结果，按阈值分层：
-    if similarity ≥ 0.85 and chunk_id not in injected:
+    if similarity ≥ 0.70 and chunk_id not in injected:
         注入（加 [自动回忆] 前缀）
         记录 injected_chunk_ids
-    elif 0.65 ≤ similarity < 0.85:
+    elif 0.50 ≤ similarity < 0.70:
         记录到 medium_confidence_log（用于后续分析）
     ↓
 Agent 继续处理
@@ -175,9 +174,9 @@ Agent 继续处理
 def sync_turn(self, user_message, assistant_response, turn_context):
     # 1. 主动检索相关记忆
     if self._should_auto_retrieve(user_message):
-        related_chunks = self._auto_retrieve(user_message, top_k=3, threshold=0.65)
+        related_chunks = self._auto_retrieve(user_message, top_k=3, threshold=0.50)
         for chunk in related_chunks:
-            if chunk['similarity'] >= 0.85 and chunk['chunk_id'] not in self._injected_chunk_ids:
+            if chunk['similarity'] >= 0.70 and chunk['chunk_id'] not in self._injected_chunk_ids:
                 self._inject_retrieved_chunks([chunk])
                 self._injected_chunk_ids.add(chunk['chunk_id'])
             # else: 记录到 medium_confidence_log
@@ -243,7 +242,7 @@ python3 scripts/batch_compute_embeddings.py
 
 **实现**：
 ```python
-def hermem_search_vector(query_emb: np.ndarray, top_k: int = 5, threshold: float = 0.65) -> list[dict]:
+def hermem_search_vector(query_emb: np.ndarray, top_k: int = 5, threshold: float = 0.50) -> list[dict]:
     # 1. 加载 hermem_embeddings.npy
     # 2. 计算余弦相似度（NumPy 向量化）
     # 3. 按相似度排序，返回 top_k
@@ -254,9 +253,9 @@ def hermem_search_vector(query_emb: np.ndarray, top_k: int = 5, threshold: float
 ```python
 # 测试
 emb = model.encode("上次我们讨论的架构设计")
-results = hermem_search_vector(emb, threshold=0.65)
+results = hermem_search_vector(emb, threshold=0.50)
 assert len(results) <= 5
-assert all(r['similarity'] >= 0.65 for r in results)
+assert all(r['similarity'] >= 0.50 for r in results)
 ```
 
 ---
@@ -293,7 +292,7 @@ assert all(r['similarity'] >= 0.65 for r in results)
 
 ### Token 成本
 
-- 仅在相似度 ≥ 0.85 时注入，每次注入约 100-300 tokens
+- 仅在相似度 ≥ 0.70 时注入，每次注入约 100-300 tokens
 - 受触发频率控制，不是每条消息都注入
 - 实际对话中，高相似度触发属于低频事件
 
@@ -302,7 +301,7 @@ assert all(r['similarity'] >= 0.65 for r in results)
 ## 验收标准
 
 1. **功能验证**：用户说一个话题，Hermem 能找到相关的历史讨论并注入上下文
-2. **阈值有效性**：相似度 < 0.65 的 chunk 不注入，0.65-0.85 进入日志，≥0.85 直接注入
+2. **阈值有效性**：相似度 < 0.50 的 chunk 不注入，0.50-0.70 进入日志，≥0.70 直接注入
 3. **防重复**：同一 chunk 在同一会话中不重复注入
 4. **性能验证**：每次检索 < 100ms，不影响响应时间
 5. **无破坏性**：V5 完成后，现有 session warmup 和 hermem_search 功能不受影响

@@ -318,7 +318,7 @@ DISPOSITION_EXTRACT_PROMPT = """你是一个记忆倾向分析器。基于以下
 # 向量检索开关与阈值
 ACTIVE_RETRIEVAL_ENABLED = True
 ACTIVE_RETRIEVAL_THRESHOLD_HIGH = 0.70  # 高置信：直接注入（实测最高相似度 0.77，0.85 阈值无法命中）
-ACTIVE_RETRIEVAL_THRESHOLD_MEDIUM = 0.65  # 中置信：缓存记录
+ACTIVE_RETRIEVAL_THRESHOLD_MEDIUM = 0.50  # 中置信累积阈值（bge-m3 实测分布调整，原 0.65 偏高）
 ACTIVE_RETRIEVAL_TOP_K = 3  # 每次最多注入 3 条
 ACTIVE_RETRIEVAL_FREQUENCY = 3  # 每 N 条消息触发一次（0=禁用）
 EMBEDDING_MODEL = "bge-m3:latest"  # 向量模型（复用现有 EMBED_MODEL）

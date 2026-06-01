@@ -148,6 +148,29 @@ def _update_error_count(db_path: Path, disp_id: str, now_iso: str) -> None:
     conn.close()
 
 
+def _record_prediction_error_v55(error_type: str, context: str, model_pred: str = "") -> None:
+    """V5.5: 写入 hermem.db.prediction_errors（供 L4 反思层使用）。
+
+    即使未匹配到任何 disposition 也记录——L4 关心错误模式本身。
+    失败不抛异常，不阻塞 disposition 更新链路。
+    """
+    hermem_db = Path.home() / ".hermes" / "memory" / "hermem.db"
+    full_context = f"{model_pred} | {context}".strip(" |") if (model_pred or context) else "(empty)"
+    try:
+        conn = sqlite3.connect(str(hermem_db))
+        try:
+            conn.execute(
+                "INSERT INTO prediction_errors (context, error_type, surprise_level) "
+                "VALUES (?, ?, ?)",
+                (full_context[:500], error_type or "unknown", 0.5),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"  [V5.5] prediction_errors 写库失败（不影响 disposition 更新）: {e}")
+
+
 # ── 核心函数 ────────────────────────────────────────────────────
 
 
@@ -219,6 +242,9 @@ def update_dispositions_from_errors(
         error_type = error.get("error_type", "") or ""
         model_pred = error.get("model_prediction", "") or ""
         context = error.get("context", "") or ""
+
+        # V5.5: 写入 hermem.db.prediction_errors（无论是否匹配 disposition）
+        _record_prediction_error_v55(error_type, context, model_pred)
 
         if not model_pred.strip():
             continue

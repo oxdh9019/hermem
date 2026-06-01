@@ -69,7 +69,9 @@ CREATE TABLE IF NOT EXISTS chunks (
     created_at  REAL    DEFAULT (julianday('now')),
     source_file TEXT,
     source_line INTEGER,
-    vec_index   INTEGER
+    vec_index   INTEGER,
+    usage_count INTEGER DEFAULT 0,
+    last_used_at REAL
 );
 
 CREATE TABLE IF NOT EXISTS embedding_cache (
@@ -150,6 +152,16 @@ def get_chunk_by_id(chunk_id: int) -> dict | None:
         if row is None:
             return None
         return _row_to_dict(row)
+
+
+def increment_chunk_usage(chunk_id: int) -> None:
+    """增加 chunk 的 usage_count，更新 last_used_at。"""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE chunks SET usage_count = usage_count + 1, last_used_at = julianday('now') WHERE id = ?",
+            (chunk_id,),
+        )
+        conn.commit()
 
 
 def get_chunk_by_vec_index(vec_index: int) -> dict | None:

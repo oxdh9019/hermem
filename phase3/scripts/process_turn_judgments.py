@@ -23,10 +23,10 @@ from datetime import datetime
 from pathlib import Path
 
 # ── Setup ───────────────────────────────────────────────────────────────────
-ROOT = Path(__file__).resolve().parents[2]  # phase3/scripts/ -> phase3/ -> projects/hermem-github
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from impl.config import DB_PATH
-from impl.utils import get_embeddings_batch, json_dumps, llm_generate, serialize_vec
+from impl.utils import get_embeddings_batch, json_dumps, llm_generate_ollama, llm_generate, serialize_vec
 
 # ── Fact extraction prompt（单轮版本）──────────────────────────────────────────
 
@@ -83,7 +83,15 @@ class FactCache:
 def extract_turn_facts(dialogue: str) -> list[dict]:
     """从单轮对话片段提取原子事实。"""
     prompt = TURN_FACT_EXTRACT_PROMPT.format(DIALOGUE=dialogue)
-    content = llm_generate(prompt, model="qwen3.5:4b-no-think", temperature=0.3, max_tokens=512)
+    # Use MiniMax API via llm_generate (auto-routes by model name)
+    # Fall back to Ollama qwen2.5:3b if MiniMax unavailable
+    try:
+        content = llm_generate(prompt, model="MiniMax-M2.7", temperature=0.3, max_tokens=512)
+    except Exception:
+        # Fallback: use Ollama via llm_generate (OpenAI compat endpoint)
+        content = llm_generate(prompt, model="qwen2.5:3b", temperature=0.3, max_tokens=512)
+    if not content:
+        return []
 
     text = content.strip()
     if text.startswith("```"):
@@ -146,7 +154,7 @@ def store_turn_facts(facts: list[dict], l0_ref: str, source: str = "turn_judgmen
             (id, l0_ref, types, type_confidence, fallback_type,
              content, tags, value, chunk_vector, created_at, status, source)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-        """,
+            """,
             (
                 fid,
                 l0_ref,
@@ -214,7 +222,11 @@ def process_judgments(path: Path, dry_run: bool = False, limit: int | None = Non
         dialogue = user_preview  # 用截断的 preview
 
         # 提取事实
-        facts = extract_turn_facts(dialogue)
+        try:
+            facts = extract_turn_facts(dialogue)
+        except Exception as e:
+            print(f"  [WARN] extract failed for session {session_id}: {e}")
+            continue
         if not facts:
             continue
         stats["extracted"] += len(facts)

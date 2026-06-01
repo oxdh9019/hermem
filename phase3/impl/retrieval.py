@@ -56,6 +56,10 @@ def semantic_search(
 
     # 3. 按 vec_index 查询 SQLite 元数据
     indices = [idx for idx, _ in top_results]
+
+    if not indices:
+        return []
+
     placeholders = ",".join(["?"] * len(indices))
 
     sql = f"""
@@ -73,15 +77,18 @@ def semantic_search(
     with database.get_db() as conn:
         rows = list(conn.execute(sql, params))
 
-    # 4. 建立 vec_index → score 映射并按分值排序
+    # 4. sqlite3.Row → dict
+    rows = [dict(r) for r in rows]
+
+    # 5. 按 vec_index 查询 SQLite 元数据
     index_to_score = dict(top_results)
     rows_sorted = sorted(
         rows,
-        key=lambda r: index_to_score.get(r[7], 0),
+        key=lambda r: index_to_score.get(r["vec_index"], 0),
         reverse=True,
     )
 
-    # 5. 概念标签过滤（AND）
+    # 6. 概念标签过滤（AND）
     if concept_filter:
 
         def concepts_include(row_concepts: str, filters: list[str]) -> bool:
@@ -95,9 +102,9 @@ def semantic_search(
 
         rows_sorted = [r for r in rows_sorted if concepts_include(r["concepts"], concept_filter)]
 
-    # 6. 异步更新命中的 chunks 的 usage_count（不阻塞返回）
+    # 7. 异步更新命中的 chunks 的 usage_count（不阻塞返回）
     if rows_sorted:
-        chunk_ids = [r["id"] for r in rows_sorted[:top_k] if r.get("id")]
+        chunk_ids = [r["id"] for r in rows_sorted[:top_k] if r["id"]]
         if chunk_ids:
             threading.Thread(
                 target=update_chunks_usage_async,
@@ -112,11 +119,16 @@ def semantic_search(
 
 
 def _chinese_2gram(text: str) -> list[str]:
-    """中文 2-gram 分词（滑动窗口）。"""
+    """中文 2-gram 分词（滑动窗口）。跳过含空格的 token 以避免 FTS5 语法错误。"""
     chars = list(text)
     if len(chars) < 2:
         return [text] if text else []
-    return [chars[i] + chars[i + 1] for i in range(len(chars) - 1)]
+    result = []
+    for i in range(len(chars) - 1):
+        gram = chars[i] + chars[i + 1]
+        if " " not in gram:  # 过滤含空格/控制字符的 token
+            result.append(gram)
+    return result
 
 
 def keyword_search(
@@ -134,7 +146,7 @@ def keyword_search(
         # fallback: 直接用原文
         fts_query = query
     else:
-        fts_query = " AND ".join(tokens)
+        fts_query = " OR ".join(f'"{t}"' for t in tokens)
 
     ",".join(["?"] * len(tokens)) if tokens else "?"
 
@@ -154,9 +166,12 @@ def keyword_search(
     with database.get_db() as conn:
         rows = list(conn.execute(sql, params))
 
+    # sqlite3.Row → dict
+    rows = [dict(r) for r in rows]
+
     # 异步更新命中的 chunks 的 usage_count
     if rows:
-        chunk_ids = [r["id"] for r in rows[:top_k] if r.get("id")]
+        chunk_ids = [r["id"] for r in rows[:top_k] if r["id"]]
         if chunk_ids:
             threading.Thread(
                 target=update_chunks_usage_async,

@@ -281,6 +281,15 @@ def call_llm(prompt: str) -> dict:
                 if m:
                     parsed[k] = m.group(1)
             if len(parsed) >= 3:  # at least 3/5 keys found
+                # Ensure all 5 keys are present; if critical ones missing, treat as failure
+                critical = ["帮 Oliver 解决了什么问题", "今天学到了什么新东西"]
+                missing = [k for k in critical if k not in parsed]
+                if missing:
+                    print(
+                        f"[journal] Fallback parse missing critical keys: {missing}, treating as failure",
+                        file=sys.stderr,
+                    )
+                    return None
                 print(
                     f"[journal] Fallback parse recovered {len(parsed)}/{len(required)} keys",
                     file=sys.stderr,

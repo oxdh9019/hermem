@@ -109,8 +109,12 @@ def search_with_tier(
     """
     分层检索：返回 (high_confidence, medium_confidence) 两个列表。
 
-    高置信（≥0.85）：直接注入上下文
-    中置信（0.65-0.85）：缓存记录，累积相似度
+    高置信（≥HIGH）：直接注入上下文
+    中置信（MEDIUM≤x<HIGH）：缓存记录，累积相似度
+
+    阈值基于 bge-m3 实测相似度分布调整：
+    - HIGH=0.70（实测相关查询最高 0.80，0.85 几乎不可达）
+    - MEDIUM=0.50（原 0.65 偏高，截断边缘候选）
 
     Args:
         query_embedding: 查询向量
