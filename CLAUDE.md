@@ -167,3 +167,48 @@ When you change the bridge, the on-disk path of the impl it discovers is `~/.her
 ### Path safety (2026-06-01 fix, P0-4)
 
 The bridge previously hardcoded `Path.home() / ".hermes" / ...` in 8 places. All of those have been replaced with module-level constants resolved through `hermes_constants.get_hermes_home()` so the bridge works correctly under profiles (`~/.hermes/profiles/<name>/`) and not just the default install.
+
+### Upgrade preflight checklist
+
+**Before** any `pip install --upgrade hermes-agent` or `git pull` inside the hermes-agent checkout:
+
+```bash
+# 1. Snapshot the current bridge (timestamped under /tmp)
+bash phase3/scripts/backup_bridge.sh
+
+# 2. (Optional) Sanity check that the smoke test passes on the *current* bridge
+python3 phase3/scripts/bridge_smoke.py
+```
+
+**After** the upgrade, **before** the first agent turn:
+
+```bash
+# 1. Smoke test the new bridge — fails non-zero on AST breakage / missing methods
+python3 phase3/scripts/bridge_smoke.py
+
+# 2. If smoke test fails, roll back to the snapshot
+bash phase3/scripts/backup_bridge.sh --list
+bash phase3/scripts/backup_bridge.sh --restore /tmp/hermem-bridge-2026-06-01
+
+# 3. Re-apply local P0-4 / P2-14 / V4.5 commits (they'll be conflicts in the new upstream)
+cd ~/.hermes/hermes-agent
+git log --oneline -10                  # find the new upstream HEAD
+git rebase origin/main                 # replay our 4 commits, resolve conflicts as needed
+python3 ~/.hermes/projects/hermem/phase3/scripts/bridge_smoke.py   # verify
+```
+
+**`bridge_smoke.py` is AST-only**: it does not import the bridge, does not touch `~/.hermes/`, and does not need Ollama. It's safe to run in <100 ms before/after any change. It checks:
+
+- `__init__.py` parses cleanly
+- All 5 tool schemas are present and JSON-serializable
+- 4 path constants (`_IMPL_PATH`, `_V55_IMPL_PATH`, `_L0L3_DB`, `_HERMEM_HOME`)
+- 15 expected methods on `HermemMemoryProvider` (or as module-level functions like `_ensure_impl`)
+- `AGENTS.md` companion doc is present and contains the expected key concepts
+
+**Long-term migration plan**: when one of these triggers occurs, migrate the bridge to a standalone plugin at `~/.hermes/plugins/hermem/` (per the NousResearch May 2026 "no new in-tree memory providers" policy). Triggers:
+
+- upstream `MemoryProvider` ABC breakage (would make the smoke test fail after rebase)
+- rebase conflict on `__init__.py` exceeding ~50 lines
+- V5.5 has been stable in production for 2-4 weeks without dogfooding issues
+
+Until then, the preflight checklist above keeps the local fork safe.
