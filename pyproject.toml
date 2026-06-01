@@ -37,5 +37,5 @@ ignore = [
 "impl/__init__.py" = ["F401"]  # re-export pattern intentional
 
 [tool.pytest.ini_options]
-testpaths = ["phase3/tests"]
-pythonpath = ["phase3"]
+testpaths = ["phase3/tests", "phase3/v5.5/tests"]
+pythonpath = ["phase3", "phase3/v5.5"]

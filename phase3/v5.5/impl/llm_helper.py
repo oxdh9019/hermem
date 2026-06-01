@@ -2,8 +2,8 @@
 """
 Hermem V5.5 - LLM 调用统一入口，支持 primary + fallback 自动降级。
 
-Primary: MiniMax-M2.7（外部 API，自动路由）
-Fallback: qwen2.5:3b（本地 Ollama，自动路由）
+Primary + Fallback 模型名从 `impl.config` 统一读取（LLM_PRIMARY_MODEL /
+LLM_FALLBACK_MODEL），不要在本文件硬编码，方便集中调整。
 
 Usage:
     from impl.llm_helper import call_llm_with_fallback
@@ -16,7 +16,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# ── 延迟导入 llm_generate ─────────────────────────────────────────────────────
+# ── 延迟导入 llm_generate + 模型名 ─────────────────────────────────────────
 
 
 def _get_llm_generate():
@@ -28,6 +28,16 @@ def _get_llm_generate():
     from impl.utils import llm_generate
 
     return llm_generate
+
+
+def _get_model_names():
+    """从 impl.config 读取 primary/fallback 模型名。"""
+    phase3_path = str(Path(__file__).parent.parent.parent)
+    if phase3_path not in sys.path:
+        sys.path.insert(0, phase3_path)
+    from impl.config import LLM_PRIMARY_MODEL, LLM_FALLBACK_MODEL
+
+    return LLM_PRIMARY_MODEL, LLM_FALLBACK_MODEL
 
 
 def call_llm_with_fallback(prompt: str, max_tokens: int = 300) -> str | None:
@@ -42,31 +52,32 @@ def call_llm_with_fallback(prompt: str, max_tokens: int = 300) -> str | None:
         生成的文本，失败时返回 None（不抛异常）。
     """
     llm_generate = _get_llm_generate()
+    primary, fallback = _get_model_names()
 
     # Primary: MiniMax-M2.7（自动路由）
     try:
         result = llm_generate(
             prompt,
-            model="MiniMax-M2.7",
+            model=primary,
             max_tokens=max_tokens,
         )
         if result and result.strip():
             return result.strip()
     except Exception as e:
-        logger.info("[LLM] Primary (MiniMax-M2.7) 调用失败: %s，尝试 fallback...", e)
+        logger.info("[LLM] Primary (%s) 调用失败: %s，尝试 fallback...", primary, e)
 
     # Fallback: qwen2.5:3b（本地 Ollama）
     try:
         result = llm_generate(
             prompt,
-            model="qwen2.5:3b",
+            model=fallback,
             max_tokens=max_tokens,
         )
         if result and result.strip():
-            logger.info("[LLM] Fallback (qwen2.5:3b) 成功")
+            logger.info("[LLM] Fallback (%s) 成功", fallback)
             return result.strip()
     except Exception as e2:
-        logger.warning("[LLM] Fallback (qwen2.5:3b) 也失败: %s，跳过", e2)
+        logger.warning("[LLM] Fallback (%s) 也失败: %s，跳过", fallback, e2)
         return None
 
     return None
@@ -76,9 +87,10 @@ def call_llm_primary(prompt: str, max_tokens: int = 300) -> str | None:
     """仅使用 primary LLM，不降级。失败返回 None。"""
     try:
         llm_generate = _get_llm_generate()
+        primary, _ = _get_model_names()
         result = llm_generate(
             prompt,
-            model="MiniMax-M2.7",
+            model=primary,
             max_tokens=max_tokens,
         )
         if result and result.strip():
@@ -93,9 +105,10 @@ def call_llm_fallback(prompt: str, max_tokens: int = 300) -> str | None:
     """仅使用 fallback LLM（本地）。失败返回 None。"""
     try:
         llm_generate = _get_llm_generate()
+        _, fallback = _get_model_names()
         result = llm_generate(
             prompt,
-            model="qwen2.5:3b",
+            model=fallback,
             max_tokens=max_tokens,
         )
         if result and result.strip():

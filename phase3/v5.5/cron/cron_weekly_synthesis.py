@@ -147,10 +147,41 @@ def cleanup_expired_l4() -> int:
         conn.close()
 
 
+def refresh_active_l4_ttls(extension_days: int = 14) -> int:
+    """P2-12: 续期活跃 L4 reflections。
+
+    当 cron 持续运行（即系统未停摆）时，每次合成把未过期 reflections 的
+    expires_at 顺延 extension_days 天。这反映"用户行为模式仍稳定"的信号。
+    副作用：cron 停跑超过 14 天后，未续期的 reflections 自动过期清理。
+
+    Returns:
+        续期数量
+    """
+    HERMEM_DB = Path.home() / ".hermes" / "memory" / "hermem.db"
+    import sqlite3
+
+    conn = sqlite3.connect(str(HERMEM_DB))
+    try:
+        cur = conn.execute(
+            "UPDATE l4_reflections "
+            "SET expires_at = julianday('now', '+' || CAST(? AS TEXT) || ' days') "
+            "WHERE expires_at IS NULL OR expires_at >= julianday('now')",
+            (extension_days,),
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def main():
     # 先清理过期 L4 reflections
     cleaned = cleanup_expired_l4()
     print(f"[V5.5 Weekly Synthesis] 清理了 {cleaned} 条过期 L4 reflections")
+
+    # P2-12: 续期活跃 reflections（即使没新数据也保留旧的）
+    refreshed = refresh_active_l4_ttls()
+    print(f"[V5.5 Weekly Synthesis] 续期了 {refreshed} 条活跃 L4 reflections")
 
     print("[V5.5 Weekly Synthesis] 开始执行...")
 

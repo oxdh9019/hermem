@@ -38,6 +38,13 @@ STAGING_CONFIRM_THRESHOLD = 5  # 满 5 条推一次确认
 # ── Error Annotation ─────────────────────────────────────────
 ERROR_ANNOTATION_MODEL = "MiniMax-M2.7"  # 可切换到 qwen3.5:9b-q4_K_M 做对比实验
 
+# ── V5.5 LLM 路由（primary + fallback）─────────────────────────
+# Primary: 用于 V5.5 L4 反思、冲突解决等需要较强推理的任务
+# Fallback: 本地 Ollama，primary 不可用时自动降级
+# 注：与 LLM_MODEL (qwen3.5:4b-no-think) 互补 — 后者用于通用 pipeline
+LLM_PRIMARY_MODEL = "MiniMax-M2.7"
+LLM_FALLBACK_MODEL = "qwen2.5:3b"
+
 ERROR_ANNOTATION_PROMPT = """你是一个严格的预测误差审计系统。请基于**对话原文中的明确内容**，逐条识别助手（Hermes）作出的**可被证伪的预测或隐含假设**，并与实际结果对比。
 
 对话摘要：
