@@ -372,6 +372,29 @@ python3 phase3/cron_daily.py
 
 ---
 
+## Hermes Agent 集成（桥接器）
+
+Hermem 是 Hermes Agent 的一个 **memory provider 插件**。本仓库（`oxdh9019/hermem`）是实现层，被一个独立的 **桥接器** 消费：
+
+| 路径 | 角色 |
+|------|------|
+| `~/.hermes/projects/hermem/`（本仓库） | **实现层** — `phase3/impl/` + `phase3/v5.5/impl/` |
+| `~/.hermes/hermes-agent/plugins/memory/hermem/` | **桥接器 / 插件入口** — `HermemMemoryProvider` 类、tool schemas、后台线程 |
+
+桥接器通过 `_ensure_impl()` 三级 fallback 定位实现：
+
+1. `__init__.py` 同级的 `./impl/` 软链接（标准安装方式）
+2. `~/.hermes/projects/hermem/phase3`（本机实际路径）
+3. `~/.hermes/projects/hermem-github/phase3`（防御性死分支，本机不存在，silently no-op）
+
+**暴露给 agent 的 tool schemas：** `hermem_search`、`hermem_add`、`hermem_forget`、`hermem_stats`，以及 2026-06-01 新增的 `hermem_resolve_conflict`。
+
+桥接器的 source of truth 是 `NousResearch/hermes-agent`。本机桥接器 working tree 在 `~/.hermes/hermes-agent/`，但**本 checkout 的改动不会 push 到上游** — 仅作为本地 fork。修改桥接器时请直接编辑本机 hermes-agent 目录中的文件并在那里提交。
+
+完整架构说明（后台线程、profile 安全、冲突解决流程）见 hermes-agent checkout 中 `plugins/memory/hermem/AGENTS.md`。
+
+---
+
 ## 已知问题
 
 | 问题 | 说明 | 后续处理 |

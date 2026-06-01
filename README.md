@@ -371,6 +371,29 @@ Comprehensive audit of the V5.5 codebase against the spec — 14 confirmed defec
 
 ---
 
+## Hermes Agent Integration (Bridge)
+
+Hermem is a **memory provider plugin** for Hermes Agent. The implementation in this repo (`oxdh9019/hermem`) is consumed by a thin **bridge** that lives in a separate checkout:
+
+| Path | Role |
+|------|------|
+| `~/.hermes/projects/hermem/` (this repo) | **Implementation** — `phase3/impl/` + `phase3/v5.5/impl/` |
+| `~/.hermes/hermes-agent/plugins/memory/hermem/` | **Bridge / plugin entry** — `HermemMemoryProvider` class, tool schemas, background threads |
+
+The bridge discovers the impl via `_ensure_impl()` with a 3-tier fallback:
+
+1. `./impl/` symlink next to `__init__.py` (canonical install)
+2. `~/.hermes/projects/hermem/phase3` (the path used on this machine)
+3. `~/.hermes/projects/hermem-github/phase3` (defensive dead branch — does not exist on this box, silently no-ops)
+
+**Tool schemas exposed to the agent:** `hermem_search`, `hermem_add`, `hermem_forget`, `hermem_stats`, and (as of 2026-06-01) `hermem_resolve_conflict`.
+
+The bridge source of truth is `NousResearch/hermes-agent`. On this machine the bridge working tree lives at `~/.hermes/hermes-agent/`, but **changes are not pushed upstream from this checkout** — they live as a local fork. To edit the bridge, modify the file in the local hermes-agent working tree and commit there.
+
+Full architectural details (background threads, profile safety, conflict resolution flow) are in the bridge's `AGENTS.md` at `plugins/memory/hermem/AGENTS.md` of the hermes-agent checkout.
+
+---
+
 ## Outstanding Issues
 
 | Issue | Notes | Revisit After |

@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Hermem is a lightweight memory enhancement system for Hermes Agent, providing L0–L3 hierarchical memory with Predictive Coding (V4) and Active Retrieval (V5).
 
-- **Current versions**: V5.1 (2026-05-27) with V5.5 (2026-05-28) in progress
+- **Current versions**: V5.5 v1.0 (2026-05-28, audit-clean 2026-06-01)
 - **Active implementation**: `phase3/impl/` — all V1–V5 code lives here
-- **Plugin wrapper**: `plugins/memory/hermem/` — symlinked to `phase3/impl/`
+- **V5.5 modules**: `phase3/v5.5/impl/` (L4 reflection, conflict resolver, active forgetting, llm_helper)
+- **Hermes Agent plugin / bridge**: lives in a separate repo (`NousResearch/hermes-agent`, at `plugins/memory/hermem/`) — see [Bridge / Plugin Architecture](#bridge--plugin-architecture) below
 - **Requirements**: Ollama (bge-m3:latest) + MiniMax API key + SQLite
 
 ## Architecture
@@ -38,15 +39,18 @@ hermem/
 │   └── daily_synthesis.py # Daily 06:00 — compress learnings into active memory
 ├── phase3/v5.5/          # V5.5: Meta-cognition, conflict, forgetting
 │   ├── impl/
-│   │   ├── llm_helper.py  # MiniMax-M2.7 primary + qwen2.5:3b fallback
-│   │   ├── l4_reflection.py # L4 synthesis from prediction_errors, 14-day TTL
+│   │   ├── llm_helper.py  # LLM routing (reads LLM_PRIMARY_MODEL/LLM_FALLBACK_MODEL from impl.config)
+│   │   ├── l4_reflection.py # L4 synthesis from prediction_errors, 14-day TTL (refreshed weekly)
 │   │   ├── conflict_resolver.py # detect_conflicts + resolve_conflict_with_action
-│   │   └── active_forgetting.py # sleep consolidation + active demotion
+│   │   └── active_forgetting.py # sleep consolidation (→ user_profile_auto.md) + active demotion
 │   ├── cron/
-│   │   └── cron_weekly_synthesis.py # Combined weekly job (L4 + consolidation + demotion)
+│   │   ├── cron_weekly_synthesis.py # L4 + consolidation + demotion + TTL refresh
+│   │   ├── com.hermes.weekly-memory-synthesis.plist # launchd job (Sunday 02:30)
+│   │   ├── run_weekly_synthesis.sh # wrapper invoked by launchd
+│   │   └── install_weekly_cron.sh # install/uninstall/run verbs
+│   ├── tests/            # V5.5-specific tests (collected by root pytest)
 │   └── migrate_v55.py    # DB migration for l4_reflections, pending_conflicts, usage columns
-└── plugins/memory/hermem/ # Hermes plugin wrapper (symlink → phase3/impl/)
-    └── templates/__init__.py # Plugin entry (HermemMemoryProvider)
+└── plugins/memory/hermem/ # Symlinked wrapper (read-only mirror, see Bridge section below)
 ```
 
 ## Key Data
@@ -106,12 +110,12 @@ hermes memory rebuild
 
 ### Cron
 ```bash
-# Daily journal (02:00) + synthesis (06:00)
-python3 phase3/scripts/journal.py && python3 phase3/scripts/daily_synthesis.py
-
-# Weekly synthesis (Sunday 02:30) — L4 + consolidation + demotion
-hermes cron create "30 2 * * 0" --name "Weekly Memory Synthesis" \
-  --script "phase3/v5.5/cron/cron_weekly_synthesis.py"
+# Weekly synthesis (Sunday 02:30) — L4 + consolidation + demotion + TTL refresh
+# Registered as launchd (not hermes cron) for reliability:
+bash phase3/v5.5/cron/install_weekly_cron.sh install
+bash phase3/v5.5/cron/install_weekly_cron.sh run      # manual trigger
+launchctl list | grep hermes.weekly-memory-synthesis   # inspect
+bash phase3/v5.5/cron/install_weekly_cron.sh uninstall
 ```
 
 ## Configuration
@@ -132,3 +136,34 @@ Ollama URL: `OLLAMA_URL` env var (default `http://localhost:11434/v1`)
 3. **Re-export pattern**: `impl/__init__.py` uses `F401` (imported but unused) intentionally — configured in per-file-ignores
 4. **WAL mode**: Both databases use `PRAGMA journal_mode=WAL` for concurrency
 5. **V5 active retrieval**: Triggers every `FREQUENCY` turns (default 3), not on every message
+
+## Bridge / Plugin Architecture
+
+Hermem is a **memory provider plugin** that plugs into Hermes Agent. The implementation in this repo (`oxdh9019/hermem`) is separate from the bridge code that actually registers the plugin with the agent.
+
+### Where the bridge code lives
+
+| Path | Role | Repo |
+|------|------|------|
+| `~/.hermes/projects/hermem/phase3/` | **Implementation** (this repo) | `oxdh9019/hermem` |
+| `~/.hermes/hermes-agent/plugins/memory/hermem/` | **Bridge / plugin entry** | `NousResearch/hermes-agent` |
+
+The bridge is a thin `HermemMemoryProvider` class that:
+
+- Implements the `agent.memory_provider.MemoryProvider` ABC
+- Discovers the impl via `_ensure_impl()` with a 3-tier fallback:
+  1. `./impl/` symlink next to `__init__.py` (canonical install)
+  2. `~/.hermes/projects/hermem/phase3` (the path used on this machine)
+  3. `~/.hermes/projects/hermem-github/phase3` (defensive dead branch — does not exist on this box, silently no-ops)
+- Exposes four tool schemas: `hermem_search`, `hermem_add`, `hermem_forget`, `hermem_stats`, plus `hermem_resolve_conflict` (added 2026-06-01)
+- Runs background threads: prefetch, V4.3 feedback consumer, V5 active retrieval, V5.5 async conflict detection
+
+### Editing the bridge
+
+The bridge source of truth is `NousResearch/hermes-agent`. On this machine the working tree lives at `~/.hermes/hermes-agent/`, but **changes are NOT pushed upstream from this checkout** — the bridge here is a local fork. Edit, test, and commit locally; the upstream hermes-agent has its own release cadence.
+
+When you change the bridge, the on-disk path of the impl it discovers is `~/.hermes/projects/hermem/phase3` (the `phase3` directory, not `phase3/impl`). The bridge's `_impl_cache` populates `impl.database`, `impl.vectorstore`, `impl.embedding`, `impl.retrieval`, `impl.config` keys. V5.5 modules come through a separate `_v55_import()` helper (importlib bypass — see P1-7 note above about `phase3/v5.5/impl/__init__.py`).
+
+### Path safety (2026-06-01 fix, P0-4)
+
+The bridge previously hardcoded `Path.home() / ".hermes" / ...` in 8 places. All of those have been replaced with module-level constants resolved through `hermes_constants.get_hermes_home()` so the bridge works correctly under profiles (`~/.hermes/profiles/<name>/`) and not just the default install.
