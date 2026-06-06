@@ -61,9 +61,11 @@ class TestMigration:
         conn.commit()
         conn.close()
 
-        # 替换路径
-        monkeypatch.setattr("phase3.v5_5.migrate_v55.HERMEM_DB", hermem_db)
-        monkeypatch.setattr("phase3.v5_5.migrate_v55.L0L3_DB", l0_db)
+        # 替换路径（用 module 对象而非 dotted name——"phase3.v5_5" 不是合法
+        # import 路径，因数字段不能作为 Python 包名；直接 import 模块再 setattr）
+        import migrate_v55 as _migrate_mod
+        monkeypatch.setattr(_migrate_mod, "HERMEM_DB", hermem_db)
+        monkeypatch.setattr(_migrate_mod, "L0L3_DB", l0_db)
 
         # 运行迁移（第一次）
         from migrate_v55 import MIGRATIONS_HERMEM, MIGRATIONS_L0L3, _migrate
@@ -141,11 +143,17 @@ class TestL4Reflection:
 
         db_path = tmp_path / "test.db"
         conn = sqlite3.connect(str(db_path))
-        conn.execute("""
+        # Python 3.14 sqlite3 execute() 一次只能执行一条语句——拆成两次
+        conn.execute(
+            """
             CREATE TABLE l4_reflections (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 reflection_text TEXT NOT NULL
             );
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE prediction_errors (
                 id INTEGER PRIMARY KEY,
                 context TEXT,
@@ -153,7 +161,8 @@ class TestL4Reflection:
                 surprise_level REAL,
                 created_at REAL DEFAULT (julianday('now'))
             );
-        """)
+            """
+        )
         # 只插入 2 条 error
         conn.execute(
             "INSERT INTO prediction_errors (context, error_type, surprise_level) VALUES (?, ?, ?)",
@@ -166,7 +175,9 @@ class TestL4Reflection:
         conn.commit()
         conn.close()
 
-        monkeypatch.setattr("phase3.v5_5.impl.l4_reflection.HERMEM_DB", db_path)
+        # 用 module 对象 patch（避免 "phase3.v5_5.impl.X" 命名空间解析失败）
+        import l4_reflection as _l4_mod
+        monkeypatch.setattr(_l4_mod, "HERMEM_DB", db_path)
 
         # 验证：2 条 error 不会触发反射
         from impl.l4_reflection import L4_MIN_ERRORS_FOR_REFLECTION, get_yesterday_errors
@@ -215,7 +226,9 @@ class TestActiveForgetting:
                 id TEXT PRIMARY KEY,
                 is_active INTEGER DEFAULT 1,
                 confidence REAL DEFAULT 0.8,
-                last_used_at REAL
+                last_used_at REAL,
+                condition_text TEXT,
+                prediction_text TEXT
             );
         """)
         # 高置信度 disposition
@@ -226,7 +239,9 @@ class TestActiveForgetting:
         conn.commit()
         conn.close()
 
-        monkeypatch.setattr("phase3.v5_5.impl.active_forgetting.L0L3_DB", l0_db)
+        # 用 module 对象 patch（避免 "phase3.v5_5.impl.X" 命名空间解析失败）
+        import active_forgetting as _af_mod
+        monkeypatch.setattr(_af_mod, "L0L3_DB", l0_db)
 
         from impl.active_forgetting import active_demotion
 
@@ -244,10 +259,12 @@ class TestConfig:
     """验证 config.py 中必要配置存在"""
 
     def test_llm_fallback_config_exists(self):
-        from impl.config import LLM_MODEL, LLM_PROVIDER
+        # V5.5 llm_helper 用 LLM_PRIMARY_MODEL / LLM_FALLBACK_MODEL
+        # （不是 LLM_MODEL）——config.py 在 V5.5 重命名过
+        from impl.config import LLM_PRIMARY_MODEL, LLM_FALLBACK_MODEL
 
-        assert LLM_MODEL
-        assert LLM_PROVIDER
+        assert LLM_PRIMARY_MODEL
+        assert LLM_FALLBACK_MODEL
         print("✅ config.py LLM 配置存在")
 
 
