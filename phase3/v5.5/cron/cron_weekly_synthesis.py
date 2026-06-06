@@ -21,11 +21,39 @@ import sys
 from pathlib import Path
 
 # ── 路径设置 ───────────────────────────────────────────────────────────────────
+# 路径冲突解决：
+#   v5.5/impl/ 有 __init__.py（让 v5.5 模块成为 `impl` namespace package），
+#   而 phase3/impl/ 也有 __init__.py（真正的 impl 包）。两者同时加进 sys.path
+#   会让 Python 选 v5.5/impl 为 `impl` 包，屏蔽 phase3/impl，导致
+#   active_forgetting 内部 `from impl.utils import ...` 失败
+#   （错误：No module named 'impl.utils'）。
+#
+# 解决：只把 phase3/impl/ 加为 `impl` 命名空间；v5.5/impl/ 下的 4 个模块
+# 改用 importlib 显式 import 到独立名字（v55_l4_reflection 等），避免命名冲突。
 SCRIPT_DIR = Path(__file__).parent
 IMPL_DIR = SCRIPT_DIR.parent / "impl"  # v5.5/impl/
-sys.path.insert(0, str(IMPL_DIR))  # → v5.5/impl/（含 llm_helper, active_forgetting）
-sys.path.insert(0, str(IMPL_DIR.parent))  # → v5.5/（兼容 phase3/impl 等）
+PHASE3_DIR = SCRIPT_DIR.parent.parent  # phase3/（含 impl/）
+sys.path.insert(0, str(PHASE3_DIR))   # → phase3/（让 `impl` 解析为 phase3/impl/）
 # WORKDIR already set to phase3 by Hermes cron runner
+
+# 显式 import v5.5 模块到独立名字（避开 `impl` namespace 冲突）
+import importlib.util as _importlib_util
+for _mod_name in ("llm_helper", "l4_reflection", "conflict_resolver", "active_forgetting"):
+    _spec = _importlib_util.spec_from_file_location(
+        f"v55_{_mod_name}",
+        str(IMPL_DIR / f"{_mod_name}.py"),
+    )
+    if _spec is None or _spec.loader is None:
+        raise ImportError(f"无法加载 v5.5 模块: {_mod_name}")
+    _mod = _importlib_util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    globals()[f"v55_{_mod_name}"] = _mod
+
+# 别名（保持向后兼容原有 `from impl.X import Y` 风格的内部引用）
+sys.modules.setdefault("impl.llm_helper", v55_llm_helper)
+sys.modules.setdefault("impl.l4_reflection", v55_l4_reflection)
+sys.modules.setdefault("impl.conflict_resolver", v55_conflict_resolver)
+sys.modules.setdefault("impl.active_forgetting", v55_active_forgetting)
 
 
 # ── 主函数 ─────────────────────────────────────────────────────────────────────
