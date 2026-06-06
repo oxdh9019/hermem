@@ -46,10 +46,12 @@ def get_embeddings_batch(texts: list[str], model: str = "bge-m3:latest") -> list
     """批量文本 embedding（减少 HTTP 开销）"""
     if not texts:
         return []
+    # bge-m3 冷启动(模型从磁盘加载到内存)在 M 系列 Mac 上可能需要 2-5 分钟
+    # 因此 batch 请求需设置较长 timeout
     resp = requests.post(
         f"{OLLAMA_URL}/embeddings",
         json={"model": model, "input": texts},
-        timeout=120,
+        timeout=600,
     )
     resp.raise_for_status()
     return [
