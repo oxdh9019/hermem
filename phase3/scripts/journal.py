@@ -29,8 +29,32 @@ LEARNINGS = HERMEM_HOME / "active_learnings_daily.md"
 JOURNAL_DIR.mkdir(exist_ok=True)
 
 
-# MiniMax (lazy load from hermes auth.json credential pool)
+# MiniMax — credential_pool entries store only id/secret_fingerprint (the actual
+# secret is resolved at request time). For cron scripts we just read the key
+# directly from ~/.hermes/.env. The credential_pool record tells us the env
+# var name (source: "env:MINIMAX_CN_API_KEY") — we use that as the canonical name.
+def _load_env_file():
+    """Populate os.environ from ~/.hermes/.env if it exists (only sets vars
+    that aren't already set, so a real shell env always wins)."""
+    import os
+    env_file = Path.home() / ".hermes" / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k = k.strip()
+        v = v.strip().strip('"').strip("'")
+        os.environ.setdefault(k, v)
+
+
 def _get_minimax_credentials() -> dict:
+    """Read auth.json for the minimax-cn credential_pool entry (metadata only).
+    Returns the pool entry so callers can read base_url etc."""
+    import os
+    _load_env_file()
     _AUTH_PATH = Path.home() / ".hermes" / "auth.json"
     if not _AUTH_PATH.exists():
         raise RuntimeError(f"auth.json not found at {_AUTH_PATH}")
@@ -39,9 +63,21 @@ def _get_minimax_credentials() -> dict:
 
 
 def _get_llm_client():
+    import os
     creds = _get_minimax_credentials()
-    MINIMAX_API_KEY = creds["access_token"]
-    MINIMAX_BASE_URL = "https://api.minimaxi.com/anthropic"
+    # The pool entry's `source` field tells us which env var holds the key,
+    # e.g. "env:MINIMAX_CN_API_KEY". Fall back to that name if not already
+    # in the environment, otherwise the legacy MINIMAX_API_KEY.
+    source = creds.get("source", "")
+    env_var = source[4:] if source.startswith("env:") else "MINIMAX_CN_API_KEY"
+    MINIMAX_API_KEY = os.environ.get(env_var) or os.environ.get("MINIMAX_API_KEY")
+    if not MINIMAX_API_KEY:
+        raise RuntimeError(
+            f"MiniMax API key not found: env var {env_var} unset. "
+            f"Check ~/.hermes/.env."
+        )
+    # base_url: prefer auth.json entry, fall back to default
+    MINIMAX_BASE_URL = creds.get("base_url") or "https://api.minimaxi.com/anthropic"
     return MINIMAX_API_KEY, MINIMAX_BASE_URL
 
 

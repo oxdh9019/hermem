@@ -128,6 +128,93 @@ def llm_generate(
             raise
 
 
+def _resolve_minimax_creds():
+    """
+    从 auth.json 解析 MiniMax-CN 凭据。
+
+    返回 (api_key, base_url)。
+
+    解析优先级（与 Hermes Agent 主体保持一致）：
+      1. auth.json 旧 schema：credential_pool[provider][i]["access_token"]  ← 老版本内嵌
+      2. auth.json 新 schema：credential_pool[provider][i]["source"] 形如 "env:VAR_NAME"，
+         从当前进程环境变量读取
+      3. 兜底：当前进程环境变量 MINIMAX_CN_API_KEY
+      4. 兜底二：直接 parse ~/.hermes/.env (Hermes 主体的 secret source of truth)
+
+    全部失败时，抛 RuntimeError 并附带完整诊断信息（auth.json 元数据 + 实际尝试过的来源），
+    避免上游再被 'KeyError: access_token' 这种空字符串误导。
+    """
+    import os as _os
+
+    _AUTH_PATH = Path.home() / ".hermes" / "auth.json"
+    if not _AUTH_PATH.exists():
+        raise RuntimeError(f"[minimax] auth.json not found at {_AUTH_PATH}")
+
+    _cred = json_loads(_AUTH_PATH.read_text())
+    pool = _cred.get("credential_pool", {}).get("minimax-cn") or []
+    if not pool:
+        raise RuntimeError(
+            f"[minimax] no credentials in pool for 'minimax-cn'. "
+            f"pool keys: {list(_cred.get('credential_pool', {}).keys())}"
+        )
+
+    creds = pool[0]  # 取最高优先级
+    base_url = creds.get("base_url", "https://api.minimaxi.com/anthropic")
+    last_status = creds.get("last_status")
+    source = creds.get("source")
+    target_var = (
+        source.split(":", 1)[1] if source and source.startswith("env:") else "MINIMAX_CN_API_KEY"
+    )
+
+    # 1) 老 schema：直接内嵌
+    if "access_token" in creds and creds["access_token"]:
+        return creds["access_token"], base_url
+
+    # 2) 新 schema + 3) 兜底 env：合并到一次遍历
+    env_val = _os.environ.get(target_var) or _os.environ.get("MINIMAX_CN_API_KEY")
+    if env_val:
+        return env_val, base_url
+
+    # 4) 兜底二：parse ~/.hermes/.env (Hermes 主体把 .env 作为 API keys 单一来源,
+    #    phase3 子进程 fork 时不会自动继承这些 env,所以这里手动 parse)
+    _ENV_PATH = Path.home() / ".hermes" / ".env"
+    if _ENV_PATH.exists():
+        try:
+            for _line in _ENV_PATH.read_text(encoding="utf-8", errors="replace").splitlines():
+                _line = _line.strip()
+                if not _line or _line.startswith("#"):
+                    continue
+                if "=" not in _line:
+                    continue
+                _k, _, _v = _line.partition("=")
+                _k = _k.strip()
+                _v = _v.strip().strip('"').strip("'")
+                # 优先匹配 auth.json 声明的 var, 其次匹配标准名
+                if _k == target_var and _v:
+                    return _v, base_url
+            # 第二轮扫,匹配标准名(应对 source 字段缺失或异常的情况)
+            for _line in _ENV_PATH.read_text(encoding="utf-8", errors="replace").splitlines():
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _k, _, _v = _line.partition("=")
+                if _k.strip() == "MINIMAX_CN_API_KEY" and _v.strip().strip('"').strip("'"):
+                    return _v.strip().strip('"').strip("'"), base_url
+        except OSError:
+            pass  # 静默失败,交给下面的诊断
+
+    # 全部失败——抛出带完整上下文的诊断
+    raise RuntimeError(
+        f"[minimax] no usable API key found. Tried: "
+        f"(1) auth.json.access_token, (2) auth.json.source='{source}', "
+        f"(3) env {target_var}, (4) parse ~/.hermes/.env. "
+        f"cred_id={creds.get('id')} last_status={last_status} "
+        f"secret_fingerprint={creds.get('secret_fingerprint')} "
+        f"env_var_present={target_var in _os.environ} "
+        f"env_file_exists={_ENV_PATH.exists()}"
+    )
+
+
 def _call_minimax(
     prompt: str,
     model: str = "MiniMax-M2.7",
@@ -136,15 +223,10 @@ def _call_minimax(
 ) -> str:
     """调用 MiniMax Chat API（Anthropic 兼容格式）"""
     import re
+    import urllib.error
     import urllib.request
 
-    _AUTH_PATH = Path.home() / ".hermes" / "auth.json"
-    if not _AUTH_PATH.exists():
-        raise RuntimeError(f"auth.json not found at {_AUTH_PATH}")
-    _cred = json_loads(_AUTH_PATH.read_text())
-    creds = _cred["credential_pool"]["minimax-cn"][0]
-    api_key = creds["access_token"]
-    base_url = "https://api.minimaxi.com/anthropic"
+    api_key, base_url = _resolve_minimax_creds()
 
     payload = {
         "model": model,
@@ -174,9 +256,18 @@ def _call_minimax(
             raw = re.sub(r"^\s*```", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
             return raw.strip()
+        except urllib.error.HTTPError as e:
+            # 401/403/429 之类——不重试，立即抛
+            body = e.read().decode("utf-8", "replace")[:200] if hasattr(e, "read") else ""
+            raise RuntimeError(
+                f"[minimax] HTTP {e.code} {e.reason}: {body}"
+            ) from e
+        except RuntimeError:
+            # _resolve_minimax_creds 抛的——不再重试
+            raise
         except Exception as e:
             if attempt == 0:
-                print(f"  [minimax] retry after error: {e}")
+                print(f"  [minimax] retry after error: {type(e).__name__}: {e}")
                 continue
             raise
 
