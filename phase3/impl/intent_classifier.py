@@ -23,6 +23,7 @@ Oliver 13 意图清单:
 """
 
 import re
+from typing import Optional
 
 from .utils import llm_generate
 
@@ -212,6 +213,36 @@ def _match_triggers(message: str) -> str | None:
     return None
 
 
+def _estimate_confidence(intent: str, msg_lower: str) -> float:
+    """V6 Sprint 1 任务 1.1:启发式 confidence(0-1)。
+
+    不依赖 LLM logit(OpenAI/Claude API 多数不暴露)。基于:
+    - 意图标签是否在 13 类定义中(基础 0.5)
+    - 该意图的触发词在消息中命中数(每命中 1 个 +0.15,封顶 0.95)
+    - 短消息(< 5 字符)降权到 0.3
+    - "other" 标签固定 0.2(低置信,触发 _v6_should_trigger)
+    """
+    if not intent or intent == "other":
+        return 0.2
+
+    if intent not in INTENT_DESCRIPTIONS:
+        return 0.3
+
+    # 基础分
+    confidence = 0.5
+
+    # 触发词命中数加分
+    triggers = INTENT_TRIGGERS.get(intent, [])
+    hit_count = sum(1 for t in triggers if t in msg_lower)
+    confidence += min(0.45, hit_count * 0.15)
+
+    # 短消息降权
+    if len(msg_lower) < 5:
+        confidence = min(confidence, 0.3)
+
+    return round(min(0.95, confidence), 2)
+
+
 # ── Layer 2: LLM 判断（仅当 Layer 1 未命中时）────────────────────────────────
 
 CLASSIFY_PROMPT = """Oliver 正在使用 AI 助手。请判断他当前消息的意图。
@@ -266,6 +297,37 @@ class IntentClassifier:
         # Layer 2: LLM 判断
         return self._llm_classify(message.strip())
 
+    def classify_with_confidence(self, message: str | None) -> tuple[str, float]:
+        """V6 Sprint 1 任务 1.1:返回 (intent_label, confidence)。
+
+        Args:
+            message: 用户消息
+
+        Returns:
+            (intent_label, confidence): confidence 0-1,越高越确定
+            - Layer 1 触发词命中:confidence = 1.0(高确定)
+            - Layer 2 LLM:基于关键词命中数 heuristic 0-1
+            - 失败 fallback:"other" / 0.0
+
+        设计依据:v2.0 SPEC 决策 — 借鉴 Memory Box 1.1 "LLM 不决策只生成",
+        confidence 不由 LLM 直接返回,降级用关键词匹配启发式计算。
+        """
+        if not message or not message.strip():
+            return "other", 0.0
+
+        message_clean = message.strip()
+        msg_lower = message_clean.lower()
+
+        # Layer 1: 触发词快速匹配 → confidence = 1.0
+        matched = _match_triggers(message_clean)
+        if matched:
+            return matched, 1.0
+
+        # Layer 2: LLM 判断 + confidence 启发式
+        intent = self._llm_classify(message_clean)
+        confidence = _estimate_confidence(intent, msg_lower)
+        return intent, confidence
+
     def _llm_classify(self, message: str) -> str:
         prompt = CLASSIFY_PROMPT.format(
             intent_list=INTENT_LIST_FOR_PROMPT,
@@ -311,6 +373,14 @@ def classify_intent(message: str) -> str:
     if _classifier is None:
         _classifier = IntentClassifier()
     return _classifier.classify(message)
+
+
+def classify_intent_with_confidence(message: str | None) -> tuple[str, float]:
+    """V6 Sprint 1 任务 1.1:全局单例入口,返回 (intent, confidence)。"""
+    global _classifier
+    if _classifier is None:
+        _classifier = IntentClassifier()
+    return _classifier.classify_with_confidence(message)
 
 
 # ── 自测 ─────────────────────────────────────────────────────────────────────
