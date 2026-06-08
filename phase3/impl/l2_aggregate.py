@@ -204,6 +204,13 @@ def merge_duplicate_scenes():
             emb2 = deserialize_vec(s2["scene_embedding"])
             sim = cosine_sim(emb1, emb2)
             if sim > SIM_THRESHOLD_MERGE:
+                # V6 Sprint 0 任务 0.5:记录 SIM_THRESHOLD_MERGE 触发次数(先观测再修)
+                try:
+                    from .stats_metrics import record_merge_attempt
+
+                    record_merge_attempt()
+                except Exception:
+                    pass
                 # 合并 s2 into s1
                 refs1 = json.loads(s1["l1_refs"])
                 refs2 = json.loads(s2["l1_refs"])

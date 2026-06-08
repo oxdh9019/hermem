@@ -303,8 +303,8 @@ BATCH_SIZE = 32
 
 # 主动检索阈值配置
 ACTIVE_RETRIEVAL_ENABLED = True
-ACTIVE_RETRIEVAL_THRESHOLD_HIGH = 0.85  # 高置信注入阈值
-ACTIVE_RETRIEVAL_THRESHOLD_MEDIUM = 0.65  # 中置信阈值
+ACTIVE_RETRIEVAL_THRESHOLD_HIGH = 0.70  # 高置信注入阈值（2026-06-01 V5.5 调整，bge-m3 实测最高 0.77）
+ACTIVE_RETRIEVAL_THRESHOLD_MEDIUM = 0.50  # 中置信阈值（2026-06-01 V5.5 调整，原 0.65 偏高截断边缘候选）
 ACTIVE_RETRIEVAL_TOP_K = 3
 ACTIVE_RETRIEVAL_FREQUENCY = 3  # 每 N 条消息触发一次（0=禁用）
 ```
@@ -455,8 +455,8 @@ print(f"空向量结果: {len(empty_results)} 条（应为0）")
 ```
 
 **验收标准**：
-- [ ] `hermem_search_vector(query_emb, threshold=0.65)` 返回相似度 ≥ 0.65 的 chunk
-- [ ] `search_with_tier()` 正确返回高置信（≥0.85）和中置信（0.65-0.85）列表
+- [ ] `hermem_search_vector(query_emb, threshold=0.50)` 返回相似度 ≥ 0.50 的 chunk
+- [ ] `search_with_tier()` 正确返回高置信（≥0.70）和中置信（0.50-0.70）列表
 - [ ] 返回结果按相似度降序排列
 - [ ] `top_k` 参数生效
 - [ ] 向量文件不存在时不报错
@@ -571,7 +571,7 @@ class HermemMemoryProvider:
 
 **验收标准**：
 - [ ] sync_turn() 方法中能调用 hermem_search_vector
-- [ ] 高置信 chunk（≥0.85）能正确注入到上下文
+- [ ] 高置信 chunk（≥0.70）能正确注入到上下文
 - [ ] 中置信 chunk 累积到 _medium_tracker
 - [ ] 同一 chunk 在同一会话中不重复注入
 - [ ] 新会话开始时所有状态重置
@@ -621,7 +621,7 @@ def test_medium_tracker_accumulation():
     assert provider._medium_tracker["test123"] == 0.78
 
     # 第三次（0.86，达到注入阈值）
-    if provider._medium_tracker["test123"] >= 0.85 and provider._medium_tracker["test123"] not in provider._injected_chunk_ids:
+    if provider._medium_tracker["test123"] >= 0.70 and provider._medium_tracker["test123"] not in provider._injected_chunk_ids:
         # 触发注入
         provider._injected_chunk_ids.add(provider._medium_tracker.pop("test123"))
     assert "test123" not in provider._medium_tracker  # 已移除
@@ -632,7 +632,7 @@ def test_medium_tracker_accumulation():
 **验收标准**：
 - [ ] 同一 chunk 在同一会话中只注入一次
 - [ ] 中置信相似度累积到 _medium_tracker
-- [ ] 相似度提升到 ≥0.85 时触发注入
+- [ ] 相似度提升到 ≥0.70 时触发注入
 - [ ] 新会话重置所有缓存状态
 
 ---
@@ -645,7 +645,7 @@ def test_medium_tracker_accumulation():
 |------|------|----------|----------|
 | T1: 高置信注入 | 用户说"上次那个 cron 任务的问题" | 找到相关 chunk 并注入，响应提到历史上下文 | 人工验证 + 格式检查 |
 | T1a: 注入格式 | 任意高置信触发 | 注入内容包含 `[自动回忆 - 相似度 X.XX]` 前缀 | 正则匹配验证 |
-| T2: 中置信缓存 | 用户说一个话题，但相似度在 0.65-0.85 | chunk 进入 _medium_tracker，不注入 | 检查 _medium_tracker |
+| T2: 中置信缓存 | 用户说一个话题，但相似度在 0.50-0.70 | chunk 进入 _medium_tracker，不注入 | 检查 _medium_tracker |
 | T3: 低置信忽略 | 用户说完全不相关的话题 | 不注入任何 chunk | 人工验证 |
 | T4: 防重复 | 连续两条消息涉及同一话题 | 只在第一条注入，第二条不再注入 | 检查 _injected_chunk_ids |
 | T5: 中置信累积 | 同一中置信 chunk 三次消息 | 相似度累积，第三次注入 | 检查 _medium_tracker 变化 |
@@ -823,8 +823,8 @@ BATCH_SIZE = 32
 
 # 主动检索阈值配置
 ACTIVE_RETRIEVAL_ENABLED = True          # 可开关
-ACTIVE_RETRIEVAL_THRESHOLD_HIGH = 0.85  # 高置信注入阈值
-ACTIVE_RETRIEVAL_THRESHOLD_MEDIUM = 0.65  # 中置信阈值
+ACTIVE_RETRIEVAL_THRESHOLD_HIGH = 0.70  # 高置信注入阈值（V5.0 旧值 0.85 → 0.70，2026-06-01 调整）
+ACTIVE_RETRIEVAL_THRESHOLD_MEDIUM = 0.50  # 中置信阈值（V5.0 旧值 0.65 → 0.50，2026-06-01 调整）
 ACTIVE_RETRIEVAL_TOP_K = 3             # 每次最多注入 3 条
 ACTIVE_RETRIEVAL_FREQUENCY = 3          # 每 N 条消息触发一次（0=禁用）
 ```
@@ -848,7 +848,7 @@ ACTIVE_RETRIEVAL_FREQUENCY = 3          # 每 N 条消息触发一次（0=禁用
 | 风险 | 概率 | 影响 | 缓解 |
 |------|------|------|------|
 | embedding 模型不可用 | 低 | 高 | Step 1 前先验证 bge 可用 |
-| 注入干扰对话 | 中 | 中 | 高阈值 0.85 + 前缀提示 |
+| 注入干扰对话 | 中 | 中 | 高阈值 0.70（V5.0 旧值 0.85）+ 前缀提示 |
 | 向量文件损坏 | 低 | 高 | 原子写入（临时文件替换）+ 备份 |
 | Hermes Agent 集成复杂度高 | 中 | 中 | Step 0 先确认路径 + 备选方案 |
 | 增量 embedding 累积导致文件过大 | 中 | 中 | >10k 时切换 FAISS（已在 roadmap） |
@@ -859,7 +859,7 @@ ACTIVE_RETRIEVAL_FREQUENCY = 3          # 每 N 条消息触发一次（0=禁用
 
 | SPEC 要求 | TODO 实现 | 状态 |
 |-----------|-----------|------|
-| 分层阈值（≥0.85 注入，0.65-0.85 缓存，<0.65 忽略） | search_with_tier + _medium_tracker | ✅ 一致 |
+| 分层阈值（≥0.70 注入，0.50-0.70 缓存，<0.50 忽略） | search_with_tier + _medium_tracker | ✅ 一致 |
 | 注入格式 [自动回忆 - 相似度 X.XX] + 分隔 | _inject_retrieved_chunk | ✅ 一致 |
 | 会话级去重 _injected_chunk_ids | 实现 | ✅ 一致 |
 | 中置信日志记录 | _medium_tracker 累积 | ✅ 一致 |
