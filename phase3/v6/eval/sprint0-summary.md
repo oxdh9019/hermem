@@ -154,3 +154,60 @@
 ---
 
 *对应文件: `phase3/v6/SPEC.md` v2.0 §3 Sprint 0 + `phase3/v6/TODO.md` v2.0*
+
+---
+
+## 6. 后置偏差(hit_rate_30d SQL bug)
+
+**日期**: 2026-06-08
+**Commits**:
+- `oxdh9019/hermem` `a8665b9` — impl stats_metrics + 5 hit_rate tests
+- `NousResearch/hermes-agent` `2a6220ac2` — bridge cli.py delegation
+
+### 6.1 Bug 性质
+
+`hit_rate_30d` SQL 用 `last_used_at > datetime('now', '-30 days')` 比较。`chunks.last_used_at` / `created_at` 存的是 **Julian Day REAL 浮点**(schema `DEFAULT julianday('now')`),而 `datetime('now', '-30 days')` 返回 **ISO 8601 字符串**。SQLite 按 dynamic typing 规则转换后,字符串 vs 浮点比较 → 永远不等。
+
+**Sprint 0 报告**:`hit_rate_30d = 0.0%`(0/2162) ← **假象**
+**真实数据**:V5 active retrieval 30 天内召回了 **84.0% (1,816/2162)** 的 chunk
+**关键指标**:`usage_count` 最高 179(单 chunk 被反复召回),198 个不同日期有命中记录
+
+### 6.2 诊断过程
+
+1. `hermes hermem stats` 输出 hit_rate = 0.0%
+2. 跑 SQL 诊断:`usage_count > 0` 545 个,但 `last_used_at > datetime('now', '-30 days')` = 0
+3. 比对 schema:`chunks.created_at REAL DEFAULT julianday('now')` 是浮点
+4. 结论:字段类型 vs 比较函数错配(SQLite dynamic typing 经典陷阱)
+
+### 6.3 修复
+
+| 改动 | 文件 | 内容 |
+|---|---|---|
+| 新增 `compute_hit_rate()` | `phase3/impl/stats_metrics.py` | 用 `julianday('now', ?)` 同类型比较,docstring 警告 datetime() 陷阱 |
+| 修 `compute_dedup_rate()` SQL | 同上 | l1_dispositions.created_at 是 ISO TEXT,必须用 `datetime()`(对比 chunks 的 REAL 浮点,文档说明) |
+| cli.py 委托 | `plugins/memory/hermem/cli.py` | hit_rate_30d 改调 `compute_hit_rate` |
+| +5 单元测试 | `phase3/v6/tests/test_sprint0_stats.py` | 含 `test_hit_rate_regression_old_code_returns_zero`,跑旧 buggy SQL 断言返回 0,锁住 bug 形状防回归 |
+
+### 6.4 验收
+
+```
+18/18 sprint0 tests pass (13 原 + 5 hit_rate)
+156/156 hermem pytest pass
+hit_rate_30d: 0.0% → 84.0% (1816/2162)
+```
+
+### 6.5 教训(V7+ 借鉴)
+
+1. **SQLite dynamic typing 陷阱**:`REAL DEFAULT julianday('now')` 列用 `datetime('now', ...)` 比较 → 永远 0。这是文档里反复强调的"type affinity"陷阱。
+2. **测试必须显式设字段值**:不能依赖 schema default(`julianday('now')` 会让 created_at = 今天,污染时间窗口测试)。
+3. **buggy code 自身作为反例测试**:直接断言"旧 SQL 跑出 0",锁住"这是真实 bug 不是测试错误"。任何人改回旧 SQL,这个测试失败并指出问题。
+4. **V7+ 候选**:`chunks.created_at` / `last_used_at` 加 `CHECK` 约束强制 julianday,或迁移到 `INTEGER` Unix 时间戳,根本上消除 dynamic typing 陷阱。
+
+### 6.6 验证清单
+
+- [x] `hermes hermem stats` 输出 `Hit rate (30d): 84.0%  (1,816 / 2,162)`
+- [x] `hermes hermem health` HEALTHY
+- [x] 18/18 stats tests pass(含 5 个 hit_rate 回归测试)
+- [x] 156/156 hermem pytest pass
+- [x] 2 commits 落地(hermem impl + hermes-agent bridge)
+- [x] `test_hit_rate_regression_old_code_returns_zero` 锁住未来不回归
