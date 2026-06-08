@@ -1,8 +1,9 @@
 """V6 Sprint 0 单元测试 — stats 指标计算。
 
-测试 impl.stats_metrics 的 3 个纯函数:
+测试 impl.stats_metrics 的 4 个纯函数:
 - compute_avg_inject_token: jsonl 日志 avg
 - compute_dedup_rate: V5.5 disposition 字段缺失/表缺失降级
+- compute_hit_rate: 关键回归 — Julian Day 浮点 vs datetime 字符串
 - get_merge_counter: 每日重置 + 线程安全
 
 不依赖 cli.py 本身(避免 sys.path 注入问题),直接测纯函数。
@@ -173,6 +174,128 @@ def test_dedup_rate_zero_rows_returns_none():
         )
     """)
     assert compute_dedup_rate(conn) is None
+    conn.close()
+
+
+# ── compute_hit_rate(Sprint 0 回归测试)──────────────────────────────────────
+
+
+def _make_chunks_schema(conn):
+    """建一个最小 chunks 表,字段类型与生产 schema 一致(Julianday 浮点)。"""
+    conn.execute("""
+        CREATE TABLE chunks (
+            id INTEGER PRIMARY KEY,
+            content TEXT,
+            usage_count INTEGER DEFAULT 0,
+            created_at REAL DEFAULT (julianday('now')),
+            last_used_at REAL
+        )
+    """)
+
+
+def test_hit_rate_zero_rows():
+    """空表 → None(避免除零)。"""
+    from impl.stats_metrics import compute_hit_rate
+
+    conn = sqlite3.connect(":memory:")
+    _make_chunks_schema(conn)
+    assert compute_hit_rate(conn) is None
+    conn.close()
+
+
+def test_hit_rate_regression_julianday_vs_datetime():
+    """Sprint 0 回归:datetime() vs julianday() 浮点比较永远 0%。
+
+    模拟生产 schema(REAL DEFAULT julianday('now'))。旧实现用
+    `last_used_at > datetime('now', '-30 days')` 会得到 0%,因为 SQLite
+    字符串 vs 浮点比较按类型亲和转换后永远不等。新实现用
+    `last_used_at > julianday('now', '-30 days')` 同类型比较,能正确命中。
+    """
+    from impl.stats_metrics import compute_hit_rate
+
+    conn = sqlite3.connect(":memory:")
+    _make_chunks_schema(conn)
+    # 显式设 created_at 为 60 天前,确保只有 last_used_at 决定命中
+    old_created = (datetime.now(UTC) - timedelta(days=60)).timestamp() / 86400 + 2440587.5
+    recent = (datetime.now(UTC) - timedelta(days=5)).timestamp() / 86400 + 2440587.5
+    for i in range(3):
+        conn.execute(
+            "INSERT INTO chunks (id, content, usage_count, created_at, last_used_at) VALUES (?, ?, 1, ?, ?)",
+            (i, f"recent-{i}", old_created, recent),
+        )
+    for i in range(3, 10):
+        conn.execute(
+            "INSERT INTO chunks (id, content, usage_count, created_at, last_used_at) VALUES (?, ?, 1, ?, ?)",
+            (i, f"old-{i}", old_created, old_created),
+        )
+    rate = compute_hit_rate(conn, days=30)
+    assert rate == 0.3, (
+        f"expected 0.3 (3/10), got {rate!r} — likely datetime/julianday bug regressed"
+    )
+    conn.close()
+
+
+def test_hit_rate_regression_old_code_returns_zero():
+    """确认旧 buggy SQL(datetime() vs REAL 浮点)真的返回 0%,证明 bug 真实存在。
+
+    锁住"用 datetime 比较浮点 = 永远 0%"这条防回归断言。
+    """
+    conn = sqlite3.connect(":memory:")
+    _make_chunks_schema(conn)
+    old_created = (datetime.now(UTC) - timedelta(days=60)).timestamp() / 86400 + 2440587.5
+    recent = (datetime.now(UTC) - timedelta(days=5)).timestamp() / 86400 + 2440587.5
+    conn.execute(
+        "INSERT INTO chunks (id, content, usage_count, created_at, last_used_at) VALUES (1, 'x', 1, ?, ?)",
+        (old_created, recent),
+    )
+    # 旧 buggy SQL: 浮点 vs 字符串永远不等
+    buggy = conn.execute(
+        """SELECT COUNT(*) FROM chunks
+           WHERE usage_count > 0
+             AND (last_used_at > datetime('now', '-30 days')
+                  OR created_at > datetime('now', '-30 days'))"""
+    ).fetchone()[0]
+    assert buggy == 0, f"old SQL should return 0 (proving the bug exists), got {buggy}"
+    conn.close()
+
+
+def test_hit_rate_created_at_path():
+    """last_used_at NULL 但 created_at 在窗口内 → 仍命中(created_at OR last_used_at)。"""
+    from impl.stats_metrics import compute_hit_rate
+
+    conn = sqlite3.connect(":memory:")
+    _make_chunks_schema(conn)
+    # 4 个全新 chunk(last_used_at NULL, created_at 今天)
+    today_jd = datetime.now(UTC).timestamp() / 86400 + 2440587.5
+    for i in range(4):
+        conn.execute(
+            "INSERT INTO chunks (id, content, usage_count, created_at, last_used_at) VALUES (?, ?, 0, ?, NULL)",
+            (i, f"new-{i}", today_jd),
+        )
+    # 1 个 created_at 旧的 chunk(双 NULL) → 不应命中
+    conn.execute(
+        "INSERT INTO chunks (id, content, usage_count, created_at, last_used_at) VALUES (99, 'ancient', 0, ?, NULL)",
+        (today_jd - 365,),
+    )
+    rate = compute_hit_rate(conn, days=30)
+    assert rate == 0.8  # 4/5 (ancient 不算)
+    conn.close()
+
+
+def test_hit_rate_all_old():
+    """全部 30 天前 → 0.0。"""
+    from impl.stats_metrics import compute_hit_rate
+
+    conn = sqlite3.connect(":memory:")
+    _make_chunks_schema(conn)
+    # 必须显式设 created_at 为旧值(否则 schema default = 今天 → 全命中)
+    old_jd = (datetime.now(UTC) - timedelta(days=365)).timestamp() / 86400 + 2440587.5
+    for i in range(5):
+        conn.execute(
+            "INSERT INTO chunks (id, content, usage_count, created_at, last_used_at) VALUES (?, ?, 1, ?, ?)",
+            (i, f"old-{i}", old_jd, old_jd),
+        )
+    assert compute_hit_rate(conn, days=30) == 0.0
     conn.close()
 
 
