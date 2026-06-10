@@ -593,3 +593,15 @@ python3 -m pytest v6/tests/test_sprint2_predictor.py -v
 *对应文件: `phase3/v6/SPEC.md` v2.0 §3 Sprint 2 + 决策 1/3/5/6/7*
 
 *Sprint 2 启动就绪。等 Sprint 2 完成后写 sprint2-summary.md + 启动 Sprint 3。*
+
+---
+
+## Sprint 2 完成状态(2026-06-10)
+
+✅ **Sprint 2 全部 7 任务完成**,见 `eval/sprint2-summary.md`:
+- 2.1-2.7 任务 + 18/18 单元测试 + 端到端 100% 成功
+- 关键决策修订(实测驱动):2b→4b,250ms→1.5s→2s→3s,few-shot examples
+- 桥层 commit `3415214c4` 在 `NousResearch/hermes-agent` 本地(未 push,403 权限,待 PR)
+
+⏭ **Sprint 3 启动**:`phase3/v6/sprint3/TODO.md`(等 Oliver 拍板后另立)
+⏭ **Sprint 3 主题**:可解释包装 + reflect API(SPEC §3 Sprint 3)
