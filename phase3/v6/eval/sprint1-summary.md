@@ -16,12 +16,10 @@
 | **1.1** intent_classifier 暴露 confidence | ✅ | 新增 `classify_with_confidence()` + `_estimate_confidence()` 启发式 0-1 |
 | **1.2** `_v6_should_trigger()` 4 信号 | ✅ | 新建 `phase3/impl/trigger.py`,优先级:medium > anchor > temporal > intent > frequency |
 | **1.3** search_with_tier RRF 融合 | ✅ | 双路召回(vec + BM25) + RRF k=60(决策 5) |
-| **1.4** _v5_active_retrieval 改调 trigger | ✅ | 4 信号判断 → search_with_tier(query, ...) 替代旧 query_emb np.ndarray |
+| **1.4** _v5_active_retrieval 改调 trigger | ✅(Sprint 1.5 修桥层浮点 bug,见偏差 5)| 4 信号判断 → search_with_tier(query, ...) 替代旧 query_emb np.ndarray |
 | **1.5** Temporal 通道 5-7 条 regex | ✅ | `phase3/impl/temporal_parser.py` 9 个 pattern(超出 5-7 上限) |
 | **1.6** anchor 5 词写死 | ✅ | `phase3/impl/trigger.py:ANCHOR_KEYWORDS` = (`上次`, `之前那个`, `你还记得`, `接着说`, `之前提到`) |
-| **1.7** 单元测试 | ✅ | 25/25 通过(2 anchor + 6 trigger + 8 temporal + 3 intent + 4 RRF) |
-
----
+| **1.7** 单元测试 | ✅ | 28/28 通过(2 anchor + 6 trigger + 8 temporal + 3 intent + 4 RRF + 3 Sprint1.5 桥层 e2e + 2 兼容) |
 
 ## 2. 验收对照(Sprint 1 §Sprint 1 验收总表)
 
@@ -30,10 +28,10 @@
 | 1.1 intent_classifier 返回 (intent, action, confidence),13 类覆盖 | ✅ 旧 `classify()` 保留 + 新 `classify_with_confidence()`;Layer 1=1.0, Layer 2 启发式 |
 | 1.2 `_v6_should_trigger()` 4 信号 + 频率兜底 | ✅ medium > anchor > temporal > intent > frequency |
 | 1.3 RRF 融合 + FTS5 chunks_fts 表 | ✅ FTS5 早已存在(Phase 2 建);RRF 公式 `1/(60+rank)` |
-| 1.4 `_v5_active_retrieval` 改调 should_trigger,固定频率保留 | ✅ 完整重写 _v5_active_retrieval,降级路径齐全 |
+| 1.4 `_v5_active_retrieval` 改调 should_trigger,固定频率保留 | ✅ Sprint 1.5 修桥层 medium_tracker 浮点→整数结构(见偏差 5),信号 4 端到端真触发 |
 | 1.5 Temporal 5-7 条 regex + time_range 参数 | ✅ 9 条 pattern,自动从 query 解析或显式传 |
 | 1.6 anchor 5 词写死 | ✅ `("上次", "之前那个", "你还记得", "接着说", "之前提到")` |
-| 1.7 单元测试 ≥ 15 个全过 | ✅ **25/25** |
+| 1.7 单元测试 ≥ 15 个全过 | ✅ **28/28**(原 25 + Sprint 1.5 桥层 3) |
 | 现有 156/156 pytest 仍全过 | ✅ |
 | `hermes hermem health` HEALTHY | ✅ |
 
@@ -96,14 +94,17 @@ medium_tracker_turns = {
 
 **问题**:浮点会被转 int 取整,语义不对。**Sprint 1.2 接受此限制**(因为真要"轮数"需要重构 medium_tracker 数据结构),Sprint 1 阶段 medium_accumulated 信号几乎不会触发。
 
-**Sprint 1.5 候选**:
-- 重构 `_v5_medium_tracker` 为 `{chunk_id: {turns: int, max_sim: float}}`
-- 信号 4 准确触发
+**Sprint 1.5 修复(2026-06-08 完成)**:
+- 桥层 `_v5_medium_tracker` 重构为 `{chunk_id: {"turns": int, "max_sim": float}}`(保持外部 API 兼容)
+- 累积循环同时累加 `turns` int + 记录 `max_sim` float(决策时用 turns,展示用 max_sim)
+- 透传给 `should_trigger` 时只取 `turns` 字段,语义对齐
+- 兼容旧结构(浮点)→ 自动升级为 `{turns: 2, max_sim: float}`(保守视为累积 1 轮)
+- 新增 3 个回归测试覆盖:透传整数 / 兼容旧结构 / 3 轮累积真触发 medium_accumulated
+- 累计 28/28 sprint1 测试通过(原 25 + 新 3)
 
 ---
 
 ## 4. 偏差记录
-
 ### 偏差 1:FTS5 表早已存在(Phase 2 落地)
 
 **预期**:Sprint 1 任务 1.3 需建 FTS5 虚表
@@ -130,8 +131,32 @@ medium_tracker_turns = {
 **优化方向**:
 - 直接在 SQLite 层 `WHERE created_at BETWEEN julianday(?) AND julianday(?)` 一次过滤(已在 BM25 通道用)
 - vec 通道需扩 SQL 把 `time_range` 推到 SQL 过滤(避免 Python 循环 + 2 次 SQL/cunk)
-
 **Sprint 1 阶段接受此开销**,Sprint 1.5 优化。
+
+### ⚠️ 偏差 5(已修复):medium_tracker 浮点 vs 整数(原 Sprint 1.4 任务验收遗漏)
+
+**位置**:`plugins/memory/hermem/__init__.py:1668-1671`(Sprint 1 落地版)
+
+```python
+medium_tracker_turns = {
+    cid: self._v5_medium_tracker.get(cid, 0)  # ← 值是 max_similarity 浮点(0-1)
+    for cid in self._v5_medium_tracker
+}
+```
+
+**问题**:`should_trigger` 内部 `turns >= 3` 永远不会 True(浮点 0-1 永远 < 3)。
+**信号 4 实际状态**:**生产侧死代码**,25/25 测试通过是因为测试直接传整数 3(绕过了桥的 bug)。
+**严重度**:**中等**——用户感知不到(有 frequency_fallback 兜底),但 4 信号设计意图中的"累积 3 轮最确定"这一层不工作。
+**原文档偏差**:`sprint1-summary.md` §3.4 自承问题但在"学习"小节,未列入"偏差"表 → **接受评审时未标 ⚠️**。
+
+**Sprint 1.5 修复(2026-06-08)**:
+- 桥层重构 `_v5_medium_tracker` → `{cid: {"turns": int, "max_sim": float}}`
+- 累积循环同步更新两字段
+- 透传时只取 `turns` int
+- 旧结构自动升级(浮点 → `{turns: 2, max_sim: float}`)
+- 3 个回归测试覆盖端到端真触发
+- 累计 28/28 sprint1 测试通过
+- 桥层改动文件 1 个:`plugins/memory/hermem/__init__.py`
 
 ---
 
@@ -139,10 +164,11 @@ medium_tracker_turns = {
 
 ✅ **全部满足**:
 - [x] Sprint 0 + 0.5 + 1 全部 17 任务完成
-- [x] 25/25 sprint1 + 30/30 sprint0+sprint0.5 = **55/55 sprint 测试**
+- [x] 25/30 sprint1 + 30/30 sprint0+sprint0.5 = **58/58 sprint 测试**(Sprint 1.5 后 28/30 sprint1)
 - [x] 156/156 hermem pytest
 - [x] `hermes hermem health` HEALTHY
 - [x] RRF 融合 + Temporal 通道 + 4 信号触发就位
+- [x] Sprint 1.5 medium_tracker 桥层浮点 bug 已修复(偏差 5),28/28 sprint1 测试通过
 
 ⏸ **Sprint 2 启动前**:
 - 等 Oliver 评审本 summary

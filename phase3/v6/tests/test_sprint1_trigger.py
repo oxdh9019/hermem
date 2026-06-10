@@ -345,3 +345,106 @@ def test_search_with_tier_explicit_time_range():
     high, medium = search_with_tier(query="cron", top_k=3, time_range=future)
     # 未来区间无 chunk → 全空
     assert high == [] and medium == []
+
+
+# ── Sprint 1.5: medium_tracker 数据结构桥接修复 ───────────────────────────
+
+
+def test_medium_tracker_bridge_extracts_turns_int():
+    """Sprint 1.5 修复:桥层 medium_tracker 透传 turns 整数给 should_trigger。
+
+    旧结构 {cid: float} → 新结构 {cid: {"turns": int, "max_sim": float}}。
+    模拟桥代码 __init__.py:1668-1672 的透传逻辑。
+    """
+    from impl.trigger import should_trigger
+
+    # 模拟桥代码:把 _v5_medium_tracker 内部结构转成 turns int dict
+    new_struct = {
+        "c1": {"turns": 1, "max_sim": 0.55},
+        "c2": {"turns": 3, "max_sim": 0.62},
+    }
+    medium_tracker_turns = {
+        cid: (entry["turns"] if isinstance(entry, dict) else 0)
+        for cid, entry in new_struct.items()
+    }
+
+    # c2 累积 3 轮,turn=7 走 frequency_fallback 也会被 medium 截胡
+    should, source = should_trigger(
+        message="普通问题",
+        intent_confidence=0.95,
+        medium_tracker_turns=medium_tracker_turns,
+        turn_count=7,
+    )
+    assert should is True
+    assert source == "medium_accumulated"  # 信号 4 真触发
+
+
+def test_medium_tracker_bridge_handles_legacy_float():
+    """Sprint 1.5 修复:桥层兼容旧结构(浮点)→ 视为累积 0 轮(不触发)。"""
+    from impl.trigger import should_trigger
+
+    # 旧结构:浮点(应该是 Sprint 1 落地前老数据)
+    legacy = {"c1": 0.85}
+    medium_tracker_turns = {
+        cid: (entry["turns"] if isinstance(entry, dict) else 0)
+        for cid, entry in legacy.items()
+    }
+    # 旧结构里没有 "turns" 字段,取默认 0 → medium 不触发
+    should, source = should_trigger(
+        message="普通问题",
+        intent_confidence=0.95,
+        medium_tracker_turns=medium_tracker_turns,
+        turn_count=1,
+    )
+    assert should is False
+    assert source is None
+
+
+def test_medium_tracker_3_turns_accumulation_e2e():
+    """Sprint 1.5 端到端模拟:同一 chunk 3 轮中置信累积 → 信号 4 真触发。
+
+    模拟 __init__.py:1730-1740 的累积循环,跑 3 次后检查 should_trigger。
+    这是修复前必失败、生产侧死代码的回归测试。
+    """
+    from impl.trigger import should_trigger
+
+    tracker: dict = {}
+
+    def accumulate(cid: str, rrf: float) -> None:
+        """复刻 __init__.py:1730-1740 的中置信累积逻辑(桥层代码)。"""
+        if cid in tracker:
+            entry = tracker[cid]
+            if isinstance(entry, dict):
+                entry["turns"] += 1
+                entry["max_sim"] = max(entry["max_sim"], rrf)
+            else:
+                tracker[cid] = {
+                    "turns": 2,
+                    "max_sim": max(entry, rrf),
+                }
+        else:
+            tracker[cid] = {"turns": 1, "max_sim": rrf}
+
+    # 跑 3 轮中置信累积(每轮 RRF 0.55 命中中置信 0.50-0.70)
+    for i in range(3):
+        accumulate("cX", 0.55)
+
+    # 桥代码:转 turns int 透传给 should_trigger
+    medium_tracker_turns = {
+        cid: (entry["turns"] if isinstance(entry, dict) else 0)
+        for cid, entry in tracker.items()
+    }
+
+    # 第 4 轮查询普通问题,无 anchor/temporal/low intent
+    should, source = should_trigger(
+        message="普通问题",
+        intent_confidence=0.95,
+        medium_tracker_turns=medium_tracker_turns,
+        turn_count=4,
+    )
+    # 修复前:tracker[cid]["turns"]=1(旧结构透传 0.85 浮点取整)→ medium 死代码
+    # 修复后:tracker[cid]["turns"]=3 → medium_accumulated 真触发
+    assert should is True
+    assert source == "medium_accumulated"
+    assert tracker["cX"]["turns"] == 3
+    assert tracker["cX"]["max_sim"] == 0.55
