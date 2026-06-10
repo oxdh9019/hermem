@@ -17,6 +17,9 @@
 - [x] `grep -rn "llm_generate_ollama" phase3/impl/utils.py` —— 已有 `llm_generate_ollama(prompt, model="qwen3.5:4b-no-think", max_tokens=50, timeout=600s)`,换 `model` 参数即可用 2b-no-think
 - [x] `ls ~/.hermes/memory/user_profile*.md` —— `user_profile.md`(手写,1.3KB) + `user_profile_auto.md`(V5.5 自动生成,0.8KB)均存在
 - [x] `grep -rn "hermem_search" plugins/memory/hermem/__init__.py` —— 已有 `HERMEM_SEARCH_SCHEMA` 工具;需新增 `HERMEM_SEARCH_PREDICTIVE_SCHEMA`
+- [x] `grep -n "def _read_user_profile\|def _get_recent_turns" plugins/memory/hermem/__init__.py` —— **均不存在**;只有 `self._last_turn_user_message`(1 轮,不是 3 轮)。Sprint 2 决策:**只读 L3 画像,不读对话历史**(方案 A,实用主义;Sprint 3 再评估)
+- [x] HermesAgent `MemoryProvider` 接口无 `recent_turns` API;近 3 轮对话需 V5 active retrieval 那种自维护 deque,**Sprint 2 跳过**
+- [x] `ollama show qwen3.5:2b-no-think` + 5 次延迟实证:warmup p95 ≈ 1.5s,cold start 5s,格式遵循差(返回长 markdown 而非查询词)。**修订决策**:改用 `qwen3.5:4b-no-think`(决策 B),实测 warm 300-500ms,100% 遵循 few-shot 格式
 - [x] `grep -rn "search_with_tier" phase3/impl/vector_search.py` —— Sprint 1 已就位,Sprint 2 预测走 `query` 参数传多个预测词
 - [x] `grep -rn "predict" phase3/impl/` —— 只有 `prediction_errors`(V4 反思机制),无"predictive recall"代码,符合"全新模块"判定
 - [x] LLM 调用模式: `no_think=True` 已在 `utils.py:238` 测过 → `qwen3.5:2b-no-think` 命名规范表示已禁用 think,无需额外参数
@@ -25,19 +28,21 @@
 
 ---
 
-## Sprint 2 任务总览
+## Sprint 2 任务总览(决策修订:qwen3.5:4b,2s timeout,few-shot examples)
 
-| 任务 | 优先级 | 内容 | 涉及文件 | 预估 |
-|---|---|---|---|---|
-| **2.1** | P0 | 预测 prompt 工程:基于 L3 画像 + 近 3 轮对话生成 2-3 个查询词 | `phase3/impl/predictor.py`(新) | 半天 |
-| **2.2** | P0 | `qwen3.5:2b-no-think` LLM 调用封装(200ms hard timeout) | `phase3/impl/predictor.py` | 2h |
-| **2.3** | P0 | `generate_predictive_queries(context, user_query) -> list[str]` 主函数 | `phase3/impl/predictor.py` | 2h |
-| **2.4** | P0 | `search_predictive()` 整合:多预测词并发 → `search_with_tier` → RRF 融合 | `phase3/impl/predictor.py` | 半天 |
-| **2.5** | P0 | 失败/超时空降级:仅返回显式结果 + log warning | `phase3/impl/predictor.py` | 1h |
-| **2.6** | P0 | 桥层加 `HERMEM_SEARCH_PREDICTIVE_SCHEMA` + `handle_tool_call` 分支 | `plugins/memory/hermem/__init__.py` | 2h |
-| **2.7** | P0 | 单元测试:预测质量 + 失败降级 + latency 监控 + ≥ 18 个 | `phase3/v6/tests/test_sprint2_predictor.py`(新) | 半天 |
+| 任务 | 优先级 | 内容 | 涉及文件 | 预估 | 状态 |
+|---|---|---|---|---|---|
+| **2.1** | P0 | 预测 prompt 工程(few-shot 强指令) | `phase3/impl/predictor.py`(新) | 半天 | ✅ |
+| **2.2** | P0 | `qwen3.5:4b-no-think` 调用封装(2s hard timeout,ndjson 解析 4b 模式) | `phase3/impl/predictor.py` | 2h | ✅ |
+| **2.3** | P0 | `generate_predictive_queries(user_profile, user_query) -> list[str]` 主函数 | `phase3/impl/predictor.py` | 2h | ✅ |
+| **2.4** | P0 | `search_predictive()` 整合:多预测词并发 → `search_with_tier` → RRF k=30 融合 | `phase3/impl/predictor.py` | 半天 | ✅ |
+| **2.5** | P0 | 失败/超时空降级:catastrophic → ([], []);predictor timeout → 显式;4 指标埋点 | `phase3/impl/predictor.py` | 1h | ✅ |
+| **2.6** | P0 | 桥层加 `HERMEM_SEARCH_PREDICTIVE_SCHEMA` + `handle_tool_call` 分支 + `_impl_cache["predictor"]` | `plugins/memory/hermem/__init__.py`(hermes-agent 仓库) | 2h | ✅ |
+| **2.7** | P0 | 18 个单元测试(prompt 2 + LLM 3 + 解析 4 + 主函数 2 + 整合 3 + 降级 2 + 桥层 2) | `phase3/v6/tests/test_sprint2_predictor.py`(新) | 半天 | ✅ |
 
-**总预估**:3-4 天(SPEC 估 1.5-2 天;按 V6 v2.0 估 8.5-12.5 天区间扣除 Sprint 0/0.5/1 已用 4 天,Sprint 2+3 余 4-8 天,Sprint 2 估 3-4 天合理)
+**实际耗时**:~3h(2026-06-10 一次性执行,无返工;主要耗时在 ndjson 解析 bug 定位 + 4b 决策切换)
+
+**总预估**:原 3-4 天 → 实际 3h(Sprint 2 决策 1+2+3 提前拍板省了大量反复,Step 0 现状核查省了 1-2h 写无用代码)
 
 ---
 
@@ -131,7 +136,7 @@ print(p)
 ```python
 import requests
 
-LLM_TIMEOUT_S = 0.2  # 200ms hard limit per SPEC
+LLM_TIMEOUT_S = 0.25  # 250ms hard limit (决策 1:接受 200ms 太严,给 cold-start 一些余量;Sprint 4 跑 50 条 ground-truth 后再调)
 LLM_MODEL = "qwen3.5:2b-no-think"
 
 def call_predictor_llm(prompt: str, timeout: float = LLM_TIMEOUT_S) -> str:
@@ -302,12 +307,13 @@ def search_predictive(
     # 4. RRF 融合(用 search_with_tier 内部的 RRF 公式,这里手工合并)
     # 注:因为 search_with_tier 已对单 query 做 RRF(vec+BM25),
     #    我们这里做的"显式 vs 预测"是 query-level 融合,用 RRF 再合并一次
-    fused_high = _rrf_fuse([explicit_high, predicted_high], k=60)
-    fused_medium = _rrf_fuse([explicit_medium, predicted_medium], k=60)
+    # 决策 2:query-level RRF k=30(显式优先,top 命中比次命中权重差距更大)
+    fused_high = _rrf_fuse([explicit_high, predicted_high], k=30)
+    fused_medium = _rrf_fuse([explicit_medium, predicted_medium], k=30)
     return fused_high[:top_k], fused_medium[:top_k]
 
 
-def _rrf_fuse(rank_lists: list[list[dict]], k: int = 60) -> list[dict]:
+def _rrf_fuse(rank_lists: list[list[dict]], k: int = 30) -> list[dict]:
     """Reciprocal Rank Fusion across multiple rank lists.
 
     Each input list is sorted by relevance (best first).
