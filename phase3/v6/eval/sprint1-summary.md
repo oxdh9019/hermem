@@ -171,9 +171,9 @@ medium_tracker_turns = {
 - [x] Sprint 1.5 medium_tracker 桥层浮点 bug 已修复(偏差 5),28/28 sprint1 测试通过
 
 ⏸ **Sprint 2 启动前**:
-- 等 Oliver 评审本 summary
-- "可以开始 Sprint 2" 后,写 `phase3/v6/sprint2-TODO.md`
-- Sprint 2 主题:预测性召回(`qwen3.5:2b-no-think` + L3 画像 + 2-3 预测查询词生成)
+- ✅ 2026-06-10 Oliver 评审通过,本 summary 已审计 + 修正 + 文档归档完成
+- ✅ 2026-06-10 `phase3/v6/sprint2/TODO.md` 已写(7 任务,589 行,Step 0 现状核查 + 任务详述 + 验收 + 风险)
+- ⏭ Sprint 2 主题:预测性召回(`qwen3.5:2b-no-think` + L3 画像 + 2-3 预测查询词生成)
 
 ---
 

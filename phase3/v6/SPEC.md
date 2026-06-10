@@ -398,7 +398,7 @@ phase3/v6/
 ├── SPEC.md                  # 本文档(v2.0,唯一进行中版本)
 ├── TODO.md                  # Sprint 0 + 0.5 任务表
 ├── sprint1/TODO.md          # Sprint 0 完成后新建
-├── sprint2-TODO.md          # Sprint 1 完成后新建
+├── sprint2/TODO.md          # Sprint 1 完成后新建
 ├── sprint3-TODO.md          # Sprint 2 完成后新建
 ├── sprint4-TODO.md          # Sprint 3 完成后新建
 ├── eval/
