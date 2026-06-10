@@ -123,7 +123,7 @@
 
 ⏸ **Sprint 1 启动前**:
 - 等 Oliver 评审本 summary
-- "可以开始 Sprint 1" 后,写 `phase3/v6/sprint1-TODO.md`(决策 5 RRF 公式 / 决策 6 Temporal regex / 决策 3 anchor 5 词 需在 Sprint 1 TODO 里细化)
+- "可以开始 Sprint 1" 后,写 `phase3/v6/sprint1/TODO.md`(决策 5 RRF 公式 / 决策 6 Temporal regex / 决策 3 anchor 5 词 需在 Sprint 1 TODO 里细化)
 - Sprint 1 启动条件之一:Sprint 0.5(行为数据基础设施)前置 30 天,或**并行启动 Sprint 0.5**(决策 4 拍板:核心 recall_outcome 在 Sprint 0.5 落地,Sprint 1-3 跑 30+ 天)
 
 ---

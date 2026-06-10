@@ -182,7 +182,7 @@ medium_tracker_turns = {
 ### 新建(4)
 - `phase3/impl/trigger.py` (88 行,任务 1.2 + 1.6)
 - `phase3/impl/temporal_parser.py` (175 行,任务 1.5)
-- `phase3/v6/sprint1-TODO.md` (414 行)
+- `phase3/v6/sprint1/TODO.md` (414 行)
 - `phase3/v6/tests/test_sprint1_trigger.py` (300 行,25 tests)
 
 ### 修改(2)
@@ -214,6 +214,6 @@ medium_tracker_turns = {
 
 ---
 
-*对应文件: `phase3/v6/SPEC.md` v2.0 §3 Sprint 1 + `phase3/v6/sprint1-TODO.md` + 决策 3/5/6/7*
+*对应文件: `phase3/v6/SPEC.md` v2.0 §3 Sprint 1 + `phase3/v6/sprint1/TODO.md` + 决策 3/5/6/7*
 
 *Sprint 2 启动就绪。等 Oliver "可以开始 Sprint 2"。*

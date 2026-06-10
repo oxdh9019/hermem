@@ -75,4 +75,4 @@
 
 ## 归档文件
 
-- `TODO.v1.minimax.md`：原 MiniMax API 方案（已废弃）
+- `TODO-v1.md`：原 MiniMax API 方案（已废弃）

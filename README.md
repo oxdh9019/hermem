@@ -3,6 +3,24 @@
 Hermes lightweight memory enhancement system — L0–L3 hierarchical memory with Predictive Coding (V4).
 
 **V5.5 v1.0 is live** (2026-05-28, audit-clean 2026-06-01). 1645 chunks embedded with bge-m3, tiered thresholds (high≥0.70/medium≥0.50), session dedup, health + rebuild CLI, weekly L4 reflection + conflict negotiation + active forgetting.
+**V6 Sprint 0+0.5+1 complete** (2026-06-08, audit-clean 2026-06-10). 4-signal trigger + RRF fusion + Temporal channel + Sprint 1.5 bridge fix. `hermes hermem health` HEALTHY.
+
+---
+
+## Documentation Architecture
+
+The base architecture is **Hermem Phase 2 v3.0** (NumPy + SQLite hybrid storage), with later versions self-contained under `phase3/vN/`. Per-sprint closeout summaries under `phase3/vN/eval/sprint{N}-summary.md`.
+
+| Version | Spec | TODO | Status | Summary |
+|---------|------|------|--------|---------|
+| Phase 1 | `phase1/SPEC.md` | `phase1/TODO.md` | ✅ Done | — |
+| Phase 2 (v3.0 base) | `phase2/SPEC.md` | `phase2/TODO.md` (+ `phase2/TODO-v1.md` legacy) | ✅ Done | — |
+| Phase 3 (L0–L3) | `phase3/SPEC.md` | `phase3/TODO.md` | ✅ Done | — |
+| V5 (active retrieval) | `Hermem-V5-SPEC.md` (top-level) | `Hermem-V5-TODO.md` (top-level) | ✅ Shipped v5.1 | — |
+| V5.5 (meta + conflict + forgetting) | `phase3/v5.5/SPEC.md` | `phase3/v5.5/TODO.md` | ✅ Live (2026-05-28) | — |
+| **V6 (trigger + RRF + Temporal)** | `phase3/v6/SPEC.md` v2.0 | `phase3/v6/TODO.md` + `phase3/v6/sprint{N}/TODO.md` per sprint | **Sprint 0+0.5+1 ✅**; Sprint 2–4 pending | `eval/sprint{0,05,1}-summary.md` |
+
+V6 v2.0 fusion decision table: `phase3/v6/SPEC.md` §1. V6 archive (v1.0–v1.3 drafts): `phase3/v6/archive/`.
 
 ---
 

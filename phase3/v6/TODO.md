@@ -573,7 +573,7 @@ except Exception as e:
 
 | Sprint | 主题 | 计划文件 | 启动条件 |
 |---|---|---|---|
-| Sprint 1 | 按需触发 + Temporal + RRF 融合 | `phase3/v6/sprint1-TODO.md` | Sprint 0 + 0.5 全绿 |
+| Sprint 1 | 按需触发 + Temporal + RRF 融合 | `phase3/v6/sprint1/TODO.md` | Sprint 0 + 0.5 全绿 |
 | Sprint 2 | 预测性召回 | `phase3/v6/sprint2-TODO.md` | Sprint 1 全绿 |
 | Sprint 3 | 可解释包装 + reflect API | `phase3/v6/sprint3-TODO.md` | Sprint 2 全绿 + 30 天 recall_outcome 数据 |
 | Sprint 4 | 评测框架 + 排序权重增强 | `phase3/v6/sprint4-TODO.md` | Sprint 3 全绿 + 30 天 recall_outcome 数据(≥ 100 条) |
