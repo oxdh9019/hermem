@@ -357,3 +357,17 @@ disposition_decay  # 时间×频次联合衰减（7天半衰期）
 - **P2**: `watchdog_vectorstore.py` drift 检测 + 自动 truncate/remap
 
 详见 [README.md](./README.md) 或 GitHub repo。
+
+---
+
+## 后续版本索引
+
+本文档描述 **Hermem Phase 2 v3.0** 基础架构（NumPy + SQLite 混合存储），为后续所有版本提供底层基础。后续版本的完整规范按以下结构组织（`phase3/vN/` 目录自包含 SPEC + TODO + impl + tests）：
+
+| 版本 | 规范文件 | 状态 | 概要 |
+|------|---------|------|------|
+| V5（主动检索）| `Hermem-V5-SPEC.md`（顶层） | 已实现 v5.1 | bge-m3 对话中检索 + 阈值 0.70/0.50 |
+| V5.5（元认知+冲突+遗忘）| `phase3/v5.5/SPEC.md` | 已上线(2026-05-28) | L4 反思 + 冲突协商 + 主动遗忘 |
+| **V6（按需触发 + RRF + 时间通道）** | `phase3/v6/SPEC.md` v2.0 | **Sprint 0+0.5+1 已完成**(2026-06-08);Sprint 2-4 待开始 | 4 信号 `should_trigger`、RRF(k=60) vec+BM25 融合、9 条 regex 时间解析、Sprint 1.5 桥层 float→int 修复 |
+
+各 sprint closeout 见 `phase3/vN/eval/sprint{N}-summary.md`。V6 v2.0 fusion 决策表见 `phase3/v6/SPEC.md` §1。

@@ -20,6 +20,7 @@ Hermes lightweight memory enhancement system — L0–L3 hierarchical memory wit
 | **V5** | **Active Retrieval** | bge-m3 vector search in-conversation — automatic memory injection during chat |
 | **V5.1** | **Engineering Fixes** | drift=91 fixed, `hermes memory health` + `rebuild` CLI, embedding automation audit (no gaps found) |
 | **V5.5** | **Meta-Cognition + Conflict + Forgetting** | L4 reflection cron (with 14-day TTL refresh), memory conflict negotiation (detection + user-facing `hermem_resolve_conflict` tool), biologically-inspired active forgetting (`user_profile_auto.md` with SHA256 dedup) |
+| **V6** | **On-Demand Trigger + RRF Fusion + Temporal Channel** | 4-signal `_v6_should_trigger()` (medium_accumulated > anchor > temporal > intent > frequency), RRF (k=60) vec+BM25 fusion, 9-regex temporal parser, `hermes hermem stats` CLI, `recall_outcome` behavior loop, Sprint 1.5 bridge float→int fix for `medium_tracker`. Plan: `phase3/v6/SPEC.md` v2.0 (Sprint 0+0.5+1 complete) |
 
 ---
 
@@ -41,9 +42,16 @@ Intent Classification (13 intents) → routes to disposition update or retrieval
 Disposition: (condition, prediction, error_count, success_count)
     ↓ daily synthesis
 Active Memory ← learnings + social learnings fed back to next prompt
+    ↓
+V6 should_trigger (4-signal: medium_accumulated > anchor > temporal > intent) → frequency_fallback
+    ↓
+search_with_tier(query) → RRF (k=60) vec(NumPy) + BM25(FTS5) → high / medium chunks
+    ↓ optional
+Temporal parser (9 regex) → time_range filter on created_at
 ```
 
 **Current data: 1711 vectors (1645 chunks), 22 dispositions, 80 L2 scenes** (as of 2026-06-01).
+**V6 production data (2026-06-10): 2350 vectors (2276 chunks) — drift 7 stale entries, non-P0.**
 
 ---
 
@@ -184,6 +192,88 @@ bash phase3/v5.5/cron/install_weekly_cron.sh uninstall
 Internally:
 - `com.hermes.weekly-memory-synthesis.plist` — launchd job, Sunday 02:30, with `__HERMES_HOME__` / `__LOG_DIR__` placeholders substituted at install time
 - `run_weekly_synthesis.sh` — wrapper that `cd`s into `phase3/` and invokes `python3 v5.5/cron/cron_weekly_synthesis.py`
+
+---
+
+## V6 — On-Demand Trigger + RRF Fusion + Temporal Channel (2026-06-06 → 2026-06-08, audit-clean 2026-06-10)
+
+V6 replaces V5's "search every turn" pattern with a **4-signal gate** that decides when to actually retrieve, plus upgrades the retrieval pipeline to **multi-channel RRF fusion** with optional **temporal filtering**.
+
+### `_v6_should_trigger()` — 4-Signal Decision
+
+Replaces V5's per-turn unconditional search. Priority order (highest wins):
+
+1. **`medium_accumulated`** — same chunk hit medium confidence ≥ 3 times in recent turns (most certain)
+2. **`anchor`** — explicit anaphora keywords (`上次`, `之前那个`, `你还记得`, `接着说`, `之前提到`)
+3. **`temporal`** — query contains time reference (`今天`, `昨天`, `上周`, `三天前`, etc.)
+4. **`intent`** — high-confidence intent classification (≥ 0.85)
+5. **`frequency_fallback`** — every N turns (default 3), regardless of signals above
+
+If no signal fires, **no retrieval happens** — saves embedding compute and avoids noise injection.
+
+**Key components:**
+- `phase3/impl/trigger.py` — `should_trigger(message, intent_confidence, medium_tracker_turns, turn_count) → (bool, source)`
+- `phase3/impl/intent_classifier.py` — `classify_with_confidence()` adds 0-1 confidence heuristic
+- `plugins/memory/hermem/__init__.py` — `_v5_active_retrieval()` rewritten to call `should_trigger` + `search_with_tier`
+
+### RRF Fusion (Vec + BM25)
+
+Two retrieval channels merged via Reciprocal Rank Fusion (k=60):
+
+```
+RRF_score(chunk) = 1/(60 + vec_rank) + 1/(60 + bm25_rank)
+```
+
+- **High tier** (RRF ≥ 0.025): both channels hit, top-3 in at least one
+- **Medium tier** (RRF ≥ 0.01): at least one channel hit, top-10
+
+Threshold tuning deferred to Sprint 4 (50 ground-truth sweep).
+
+**Key components:**
+- `phase3/impl/vector_search.py` — `search_with_tier(query=None, query_embedding=None, top_k=3, time_range=None)` — backward-compatible signature, lazy encodes query
+- FTS5 `chunks_fts` table (already exists from Phase 2 — verified before writing task)
+
+### Temporal Channel
+
+Lazy regex parser extracts time ranges from natural-language queries (no explicit parameter needed):
+
+- 9 patterns: `今天/明天/昨天`, `本周/上周/下周`, `X天前`, `X小时前`, `上次...`, `之前那个...`
+- Auto-parsed when `time_range=None`; explicit override available
+- Failed parse → `time_range=None` (graceful degradation, no error)
+
+**Key component:** `phase3/impl/temporal_parser.py`
+
+### Observability Foundation (Sprint 0)
+
+New `hermes hermem stats` CLI exposes baseline metrics (chunk count, hit rate, inject token, dedup rate). `recall_outcome` table (Sprint 0.5) captures recall → user follow-up behavior, feeding future weight-tuning algorithms.
+
+### Sprint 1.5 Bridge Fix (2026-06-08)
+
+`_v5_medium_tracker` was passing max_similarity float (0-1) as turns to `should_trigger()` — `turns >= 3` was unreachable. **Signal 4 was production-side dead code** (25/25 tests passed because tests bypassed the bridge).
+
+**Fix:** Restructured to `{chunk_id: {"turns": int, "max_sim": float}}` with auto-upgrade from legacy float. 3 regression tests added. See `phase3/v6/eval/sprint1-summary.md` §4 deviation 5.
+
+### P1/P2 Root-Cause Fixes (2026-06-06, committed 2026-06-10)
+
+| Layer | Issue | Fix |
+|-------|-------|-----|
+| `impl/embedding.py` | `ollama.embeddings(timeout=30)` was decorative — SDK default `httpx.Client(timeout=None)` → infinite hang | Explicit `ollama.Client(timeout=httpx.Timeout(30.0))` with caller override |
+| `impl/vectorstore.py` | macOS `flock` is advisory; dead process fd lingers and blocks new `LOCK_EX` | `_check_lock_orphans()` uses `lsof` to detect dead PIDs, log WARNING + cleanup instructions |
+
+### Status (2026-06-10)
+
+| Sprint | Tasks | Status | Summary |
+|--------|-------|--------|---------|
+| Sprint 0 (observability) | 5/5 | ✅ | `eval/sprint0-summary.md` |
+| Sprint 0.5 (behavior data) | 6/6 | ✅ | `eval/sprint05-summary.md` |
+| Sprint 1 (trigger + RRF + Temporal) | 7/7 | ✅ | `eval/sprint1-summary.md` |
+| Sprint 2 (predictive recall) | — | ❌ Not started | — |
+| Sprint 3 (explainable wrapper) | — | ❌ Not started | — |
+| Sprint 4 (eval framework) | — | ❌ Not started | — |
+
+**Test counts (2026-06-10 verify-on-disk):** `phase3/v6/tests/` 58/58, `phase3/tests/` 138/138, `phase3/v5.5/tests/` 18/18. `hermes hermem health`: 1 non-P0 drift (2357 meta vs 2350 npy = 7 stale), fix via `hermes memory rebuild`.
+
+Full plan: `phase3/v6/SPEC.md` v2.0. Per-sprint summaries: `phase3/v6/eval/sprint{0,05,1}-summary.md`.
 
 ---
 
