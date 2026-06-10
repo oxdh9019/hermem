@@ -349,7 +349,7 @@ def _has_anchor(text: str) -> bool:
 
 | Sprint | 主题 | 启动条件 |
 |---|---|---|
-| Sprint 2 | 预测性召回(qwen3.5:2b-no-think)| Sprint 1 全绿 + RRF 调优有 ground truth |
+| Sprint 2 | 预测性召回(`qwen3.5:4b-no-think`,2026-06-10 决策 8 修订)| Sprint 1 全绿 + RRF 调优有 ground truth |
 | Sprint 3 | 可解释包装 + reflect API(决策 7) | Sprint 2 全绿 |
 | Sprint 4 | 评测框架 + 排序权重增强(50/450 split) | Sprint 3 全绿 + 30+ 天 recall_outcome 数据(≥ 100 条) |
 

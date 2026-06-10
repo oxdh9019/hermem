@@ -41,6 +41,7 @@ V5 已解决"对话过程中能不能主动找到相关历史记忆",V5.5 补了
 | **5** | hybrid 融合公式 | **RRF 融合**(`rrf = 1/(60+rank_vec) + 1/(60+rank_bm25)`) | rank-based,无需通道分数校准;Hindsight 论文已论证 |
 | **6** | Temporal 通道时间词解析 | **手写 regex(5-7 条)** | dateparser 200KB 依赖不值;regex 覆盖中文"上周/上个月/YYYY-MM/Q1 2026"已够 |
 | **7** | reflect vs L4 边界 | **reflect = 即时(用户调时)**,**L4 = 批处理(launchd 周日 02:30)** | 互不替代;reflect 写 L4 标 `source=reflect_immediate` |
+| **8** | 调用本地 LLM 模型选择 | **一律 `qwen3.5:4b-no-think`**(2026-06-10 全面复核) | 原 v2.0 §3 Sprint 2/3 写 `2b-no-think`;Sprint 2 实测 2b 1.5-5.5s 不稳定 + 格式遵循 0%,4b warm 380ms + cold 1.7-2.0s + 100% 遵循 few-shot;统一规范为 4b(Sprint 2 决策 B + 2026-06-10 全面复核) |
 
 **v1.0-v1.3 草案归档至** `phase3/v6/archive/`,仅作决策上下文参考。本 v2.0 是唯一进行中版本,不再以"v2.1 追加"方式扩张(任何新增 → v3.0 走完整融合流程)。
 
@@ -89,7 +90,7 @@ Agent 处理 → 响应
     ↓ 触发
 1. Temporal 过滤(Sprint 1.5)→ 先按时间区间缩候选集
 2. 显式检索(vec + BM25 → RRF 融合)→ Sprint 1.1
-3. 预测性召回(L3 画像 + 对话上下文, qwen3.5:2b 生成 2-3 预测词)→ Sprint 2
+3. 预测性召回(L3 画像 + 对话上下文, `qwen3.5:4b-no-think` 生成 2-3 预测词)→ Sprint 2(原 v2.0 写 2b,2026-06-10 决策 8 全面复核统一为 4b)
 4. recall_outcome hook(记录 chunk_id + 触发原因)→ Sprint 0.5
     ↓
 [explain_chunk()] ← 模板默认,LLM 增强 opt-in → Sprint 3
@@ -129,7 +130,7 @@ Agent 处理 → 响应
 
 **流程**:
 1. 读 L3 `user_profile.md` + 当前对话前 3 轮
-2. `qwen3.5:2b-no-think` 生成 2-3 预测性查询词(本地,latency ≤ 200ms)
+2. `qwen3.5:4b-no-think` 生成 2-3 预测性查询词(本地,2026-06-10 决策 8:原 v2.0 写 2b,实测修订 4b;hard timeout 3s 而非 200ms)
 3. 对每条查询词走显式检索(threshold=MEDIUM)
 4. 与显式检索结果合并去重(用 RRF 分数)
 5. 失败/超时空降级:仅返回显式结果
@@ -142,7 +143,7 @@ Agent 处理 → 响应
 
 **`explain_chunk(chunk, current_query) -> str`**:
 - **轻量路径**(默认):4-6 个固定句式模板轮转
-- **增强路径**(opt-in):`qwen3.5:2b-no-think` 生成,latency ≤ 200ms
+- **增强路径**(opt-in):`qwen3.5:4b-no-think` 生成(2026-06-10 决策 8);Sprint 3 评估时如延迟过高可走 opt-in 关闭
 - 失败降级到 V5 格式(`[自动回忆 - 相似度 0.91]`)
 
 **对比**:
@@ -157,7 +158,7 @@ Agent 处理 → 响应
 - 失败时降级到 V5,不阻断流程
 
 **Sprint 3 合并实现**:
-- **任务 3.5** `hermem_reflect()` 按需 API(决策 7):4 路召回(temporal + vec + bm25 + rrf)→ top-k 拼 context → 调一次 `qwen3.5:2b-no-think` → 返回答案 + 可选写 L4(标 `source=reflect_immediate`)
+- **任务 3.5** `hermem_reflect()` 按需 API(决策 7):4 路召回(temporal + vec + bm25 + rrf)→ top-k 拼 context → 调一次 `qwen3.5:4b-no-think`(2026-06-10 决策 8)→ 返回答案 + 可选写 L4(标 `source=reflect_immediate`)
 - 与 explain_chunk 合并实现,共享 LLM 调用路径
 
 #### 模块 4:行为闭环(Behavior Loop)— Sprint 0.5(提前) + Sprint 4 增强
@@ -276,7 +277,7 @@ Agent 处理 → 响应
 | 任务 | 内容 | 预估 |
 |---|---|---|
 | **2.1** | `hermem_search_predictive()` 接口实现(与 `hermem_search` 平行) | 半天 |
-| **2.2** | `qwen3.5:2b-no-think` 预测查询词生成 prompt + 200ms timeout | 半天 |
+| **2.2** | `qwen3.5:4b-no-think` 预测查询词生成 prompt + 3s timeout(决策 8 修订:原 2b 200ms) | 半天 |
 | **2.3** | 预测结果与显式结果合并去重(RRF 分数) | 半天 |
 | **2.4** | 失败/超时空降级:仅返回显式结果 | 1 h |
 | **2.5** | 单元测试:预测质量 + 失败降级 + latency 监控 | 半天 |
@@ -292,7 +293,7 @@ Agent 处理 → 响应
 |---|---|---|
 | **3.1** | 4-6 个固定过渡句模板(中文优先,与 V5 `[自动回忆]` 标签融合) | 2 h |
 | **3.2** | `explain_chunk()` 轻量路径(模板默认) | 2 h |
-| **3.3** | `explain_chunk()` 增强路径(`qwen3.5:2b-no-think` opt-in + 200ms 监控) | 2 h |
+| **3.3** | `explain_chunk()` 增强路径(`qwen3.5:4b-no-think` opt-in + 3s 监控;决策 8 修订) | 2 h |
 | **3.4** | V6 inject 路径调用 `explain_chunk()`,失败降级到 V5 格式 | 1 h |
 | **3.5** | `hermem_reflect()` API(决策 7):4 路召回 + 一次 LLM 综合 + 可选写 L4(标 `source=reflect_immediate`) | 1 天 |
 | **3.6** | 单元测试:模板轮转 + LLM opt-in + reflect 写 L4 边界 | 半天 |
@@ -353,7 +354,7 @@ Agent 处理 → 响应
 
 | 风险 | 严重度 | 缓解 |
 |---|---|---|
-| `qwen3.5:2b-no-think` 延迟不稳(> 200ms) | 中 | Sprint 2/3 默认走模板/显式路径,LLM 路径 opt-in;超时降级 |
+| `qwen3.5:2b-no-think` 延迟不稳(原 v2.0 假设,2026-06-10 决策 8 修订) | 中 | 修订为 4b 后延迟稳定(warm 380ms,cold 1.7-2.0s);Sprint 2/3 仍走模板/显式路径优先,LLM 路径 opt-in;3s hard timeout 兜底 |
 | 评测标注集构建成本 | 中 | Sprint 4 任务 4.2 由 Oliver 主导,AI 提供候选标注 + 人工 review |
 | LLM logit 不可用(OpenAI/Claude 风格 API 多数不暴露) | 高 | 按需触发主信号降级为"意图置信度 + anchor 关键词 + 中置信累积"三件套,不强依赖 logit |
 | Temporal regex 漏掉长尾时间词 | 低 | 后续可加 dateparser;Sprint 1 先覆盖 80% 中文用例 |

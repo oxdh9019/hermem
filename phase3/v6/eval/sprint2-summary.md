@@ -231,3 +231,44 @@ return final_content or "".join(streamed_content)
 *对应文件: `phase3/v6/SPEC.md` v2.0 §3 Sprint 2 + `phase3/v6/sprint2/TODO.md` + 决策 1/2/3 实测修订*
 
 *Sprint 2 启动 ✅ → Sprint 3 启动就绪。等 Oliver 决策:开 PR(A) / 跳过(B) / 启动 Sprint 3。*
+
+---
+
+## 8. 2026-06-10 全面复核修订(Oliver 指令:调用本地 LLM 一律 4b)
+
+**触发**:Oliver 指令"全面复核并修改 V6 项目的文档和代码,调用本地 LLM 一律使用 qwen3.5:4b-no-think"。
+
+**审计发现**(Sprint 2 启动后多处文字/代码与"调用本地 LLM 一律 4b"规范不一致):
+
+| 位置 | 类型 | 原文 | 修订 |
+|------|------|------|------|
+| `phase3/v6/SPEC.md` §3 Sprint 2 任务表 2.2 | 文档 | `qwen3.5:2b-no-think` 200ms | 4b + 3s |
+| `phase3/v6/SPEC.md` §3 Sprint 3 任务表 3.3 | 文档 | 2b opt-in 200ms | 4b + 3s |
+| `phase3/v6/SPEC.md` §3 Sprint 3 任务 3.5 reflect | 文档 | 2b | 4b |
+| `phase3/v6/SPEC.md` §3 模块 2/3 流程 | 文档 | 2b | 4b |
+| `phase3/v6/SPEC.md` §5 风险表 | 文档 | "2b 延迟不稳" | 标注"原 v2.0 假设,修订 4b" |
+| `phase3/v6/SPEC.md` §1 决策表 | 文档 | (无决策 8) | **新增决策 8:调用本地 LLM 一律 4b** |
+| `phase3/v6/sprint1/TODO.md` Sprint 2 行 | 文档 | 2b | 4b(标决策 8 修订) |
+| `phase3/v6/sprint2/TODO.md` 13 处 2b | 文档 | 多处 | 全部改 4b(代码示例)+ 叙事保留 + 标"决策 8" |
+| `phase3/impl/predictor.py` 6 处 docstring | 代码 | 2b(注释/类) | 4b(代码已 4b,注释同步) |
+| `phase3/impl/config.py:46` | 代码 | `LLM_FALLBACK_MODEL = "qwen2.5:3b"` | **`"qwen3.5:4b-no-think"`** |
+| `hermes-agent/__init__.py:1029` 注释 | 文档 | 2b 注释 | 4b(代码已 4b,注释同步) |
+
+**新增决策 8 全文**(SPEC §1):
+> 调用本地 LLM 模型选择 → **一律 `qwen3.5:4b-no-think`**(2026-06-10 全面复核)。
+> 原 v2.0 §3 Sprint 2/3 写 `2b-no-think`;Sprint 2 实测 2b 1.5-5.5s 不稳定 + 格式遵循 0%,
+> 4b warm 380ms + cold 1.7-2.0s + 100% 遵循 few-shot;统一规范为 4b
+> (Sprint 2 决策 B + 2026-06-10 全面复核)。
+
+**关键发现**:
+- `predictor.py:157` 的 `LLM_MODEL` 实际就是 4b(只是注释/类 docstring 写 2b),**代码行为未变,只修注释**
+- `LLM_FALLBACK_MODEL` 从 `qwen2.5:3b` → 4b 是**实际行为变更**:
+  - v5.5 LLM fallback 路径(primary MiniMax 失败时)从 qwen2.5:3b 改 4b
+  - 影响:错误标注等 V4.3 路径,fallback 质量提升(4b 显著强于 qwen2.5:3b)
+- 桥层 `__init__.py:1029` 的 LLM 二分类调用代码已是 `qwen3.5:4b-no-think`,**注释错误**(原本写 2b)—— 同步注释
+
+**验证**:
+- 232/232 pytest 通过(v6 76 + phase3 138 + v5.5 18),代码层零回归
+- 文档/spec 一致性扫描:所有 `qwen3.5:2b-no-think` 文字现在都带"原 v2.0 / 决策 8 修订"标注,或代码层已用 4b
+
+**新增 commit**: 复核修订(待 commit + push)

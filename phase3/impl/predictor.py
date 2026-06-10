@@ -1,12 +1,16 @@
 """Hermem V6 - 预测性召回(Sprint 2)。
 
-L3 画像 → qwen3.5:2b-no-think 生成 2-3 预测查询词 → search_with_tier 多路
+L3 画像 → qwen3.5:4b-no-think 生成 2-3 预测查询词 → search_with_tier 多路
 → query-level RRF 融合 → 失败降级到显式。
 
 设计要点(决策 1/2/3):
-- LLM hard timeout 250ms(决策 1,200ms 太严,实测 cold-start 需余量)
+- LLM hard timeout 3s(决策 1 修订:2b 实测 1.5-5.5s 不稳定,2s 撞 p95 边界,3s 给 50% 余量)
 - query-level RRF k=30(决策 2,显式优先,top 命中权重差距大)
 - 不读近 3 轮对话(决策 3,MemoryProvider 接口无 recent_turns,降级为只用 L3 画像)
+
+LLM 模型:qwen3.5:4b-no-think(2026-06-10 全面复核规范:调用本地 LLM 一律 4b)
+- 决策 B 修订(2026-06-10):原 SPEC v2.0 写 2b;实测 2b 1.5-5.5s 不稳定 + 格式遵循 0%;
+  切 4b warm 380ms + cold 1.7-2.0s + 100% 遵循 few-shot 格式
 """
 
 import json
@@ -24,7 +28,7 @@ logger = logging.getLogger(__name__)
 # ── 配置(Sprint 2 决策 B 复核修订:4b,实测 cold 1.7-2.0s p95,
 # 2s 撞边界 → 0% 成功率;改 3s 给 p95 + 50% 余量)──
 LLM_TIMEOUT_S = 3.0
-LLM_MODEL = "qwen3.5:4b-no-think"  # 决策 B:2b → 4b(2b 1.5-5.5s 不稳定 + 格式差)
+LLM_MODEL = "qwen3.5:4b-no-think"  # 2026-06-10 全面复核规范:调用本地 LLM 一律 4b;决策 B 修订 2b→4b(2b 1.5-5.5s 不稳定 + 格式差)
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"  # 原生 API,不走 /v1
 
 # ── 指标埋点(供 Sprint 4 eval 用)───────────────────────────────────────
@@ -88,7 +92,8 @@ def read_user_profile(max_chars: int = 1500) -> str:
 
 
 # ── 任务 2.1:预测 prompt 工程(决策 A 修订:few-shot examples)─────────
-# few-shot 是必要的:qwen3.5:2b-no-think 不擅长严格格式,无 examples 会生成长文
+# few-shot 是必要的:qwen3.5:4b-no-think 不擅长严格格式(无 examples 会生成长文;有 examples 100% 遵循)
+# 2026-06-10 全面复核:之前写"2b 不擅长"已过时,4b 同样需要 few-shot,但 4b 实际表现远优于 2b
 PREDICTIVE_PROMPT = """你是 Hermem 记忆助手的查询预测器。基于用户画像和当前问题,生成 2-3 个用户**接下来可能想问**的查询词。
 
 ## 示例(严格按此格式)
@@ -130,9 +135,10 @@ def build_predictive_prompt(
     user_profile: str,
     user_query: str,
 ) -> str:
-    """Build prompt for qwen3.5:2b-no-think predictive query generation.
+    """Build prompt for qwen3.5:4b-no-think predictive query generation.
 
     Sprint 2 决策 3:不传 recent_turns;只基于 L3 画像 + 当前问题。
+    2026-06-10 全面复核:模型名 2b → 4b(决策 B 修订,见 sprint2-summary §3.1)。
     """
     return PREDICTIVE_PROMPT.format(
         user_profile=user_profile or "(无画像)",
@@ -140,18 +146,19 @@ def build_predictive_prompt(
     )
 
 
-# ── 任务 2.2:qwen3.5:2b-no-think 调用封装(250ms hard timeout)────────
+# ── 任务 2.2:qwen3.5:4b-no-think 调用封装(3s hard timeout)────────
 def call_predictor_llm(prompt: str, timeout: float = LLM_TIMEOUT_S) -> str:
-    """Call qwen3.5:2b-no-think for predictive query generation.
+    """Call qwen3.5:4b-no-think for predictive query generation.
 
-    1.5s hard timeout(决策 1 修订,实测 p95 ≈ 1.3s,250ms 不可行)。
+    3s hard timeout(决策 1 修订 + 复核修订:2b 1.5-5.5s 不可行,2s 撞 p95 边界 → 0% 成功,
+    4b cold 1.7-2.0s + 50% 余量 = 3s)。
     Exceeds → raise requests.Timeout。
 
     解析 ndjson:stream=False 时 Ollama 仍返回多行 JSON(每 token 一行),
     content 分散在所有 done=False 行;累积拼接后返回最后内容。
+    (4b 模式:done=true 行 message.content 是完整内容,优先取)
 
-    显式 think=False(决策 A 修订:qwen3.5:2b-no-think tag 仍可能 thinking,
-    必须显式禁用)。
+    显式 think=False(4b 验证需要显式禁用,即使 tag 标了 -no-think)。
     """
     payload = {
         "model": LLM_MODEL,
@@ -227,6 +234,7 @@ def generate_predictive_queries(
 
     Returns empty list on any failure (timeout, parse error, etc.).
     Caller is responsible for fallback to explicit-only search.
+    2026-06-10 全面复核:模型名 2b → 4b(决策 B 修订)。
     """
     t0 = time.time()
     try:

@@ -43,7 +43,7 @@ ERROR_ANNOTATION_MODEL = "MiniMax-M2.7"  # 可切换到 qwen3.5:9b-q4_K_M 做对
 # Fallback: 本地 Ollama，primary 不可用时自动降级
 # 注：与 LLM_MODEL (qwen3.5:4b-no-think) 互补 — 后者用于通用 pipeline
 LLM_PRIMARY_MODEL = "MiniMax-M2.7"
-LLM_FALLBACK_MODEL = "qwen2.5:3b"
+LLM_FALLBACK_MODEL = "qwen3.5:4b-no-think"  # 2026-06-10 全面复核修订:fallback 统一用 4b,不再用 qwen2.5:3b
 
 ERROR_ANNOTATION_PROMPT = """你是一个严格的预测误差审计系统。请基于**对话原文中的明确内容**，逐条识别助手（Hermes）作出的**可被证伪的预测或隐含假设**，并与实际结果对比。
 

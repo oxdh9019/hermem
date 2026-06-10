@@ -4,7 +4,8 @@
 **日期**: 2026-06-10
 **状态**: Sprint 0+0.5+1 全部 ✅ 完成,启动 Sprint 2
 **依据**: `phase3/v6/SPEC.md` v2.0 §3 Sprint 2 + 决策 1/3/5/6/7
-**主题**: 基于 L3 画像 + 近 3 轮对话上下文,用 `qwen3.5:2b-no-think` 生成 2-3 个预测查询词,合并到 `search_with_tier` 召回管线
+**主题**: 基于 L3 画像 + 近 3 轮对话上下文,用 `qwen3.5:4b-no-think` 生成 2-3 个预测查询词,合并到 `search_with_tier` 召回管线
+**(2026-06-10 决策 8 全面复核:本主题原写 2b,实测修订 4b,见 sprint2-summary §3.1 + SPEC §1 决策 8)**
 
 > **范围声明**:本 TODO 覆盖 Sprint 2 全部 7 任务。Sprint 3+ 启动时另立 `sprint3/TODO.md`,不在本文档展开。
 
@@ -12,9 +13,9 @@
 
 ## Step 0:现状核查(写代码前必做)
 
-- [x] `grep -rn "qwen3.5" phase3/impl/config.py` —— `LLM_MODEL = "qwen3.5:4b-no-think"`(通用 pipeline);`LLM_PRIMARY_MODEL = "MiniMax-M2.7"`(API 路由);`LLM_FALLBACK_MODEL = "qwen2.5:3b"`。`qwen3.5:2b-no-think` 尚未配置为路由项。
-- [x] `ollama show qwen3.5:2b-no-think` —— 模型已就绪,`thinking` capability ✓,Q8_0 量化
-- [x] `grep -rn "llm_generate_ollama" phase3/impl/utils.py` —— 已有 `llm_generate_ollama(prompt, model="qwen3.5:4b-no-think", max_tokens=50, timeout=600s)`,换 `model` 参数即可用 2b-no-think
+- [x] `grep -rn "qwen3.5" phase3/impl/config.py` —— `LLM_MODEL = "qwen3.5:4b-no-think"`(通用 pipeline);`LLM_PRIMARY_MODEL = "MiniMax-M2.7"`(API 路由);`LLM_FALLBACK_MODEL = "qwen3.5:4b-no-think"`(2026-06-10 决策 8:fallback 也改 4b,不再用 qwen2.5:3b)。`qwen3.5:2b-no-think` 经实测不达标,未配置。
+- [x] `ollama show qwen3.5:2b-no-think` —— 模型已就绪,`thinking` capability ✓,Q8_0 量化(2026-06-10 决策 8:经实测不达标,Sprint 2 改用 4b;此处为历史核查记录)
+- [x] `grep -rn "llm_generate_ollama" phase3/impl/utils.py` —— 已有 `llm_generate_ollama(prompt, model="qwen3.5:4b-no-think", max_tokens=50, timeout=600s)`,直接用默认参数即可(2026-06-10 决策 8:用 4b 而非 2b)
 - [x] `ls ~/.hermes/memory/user_profile*.md` —— `user_profile.md`(手写,1.3KB) + `user_profile_auto.md`(V5.5 自动生成,0.8KB)均存在
 - [x] `grep -rn "hermem_search" plugins/memory/hermem/__init__.py` —— 已有 `HERMEM_SEARCH_SCHEMA` 工具;需新增 `HERMEM_SEARCH_PREDICTIVE_SCHEMA`
 - [x] `grep -n "def _read_user_profile\|def _get_recent_turns" plugins/memory/hermem/__init__.py` —— **均不存在**;只有 `self._last_turn_user_message`(1 轮,不是 3 轮)。Sprint 2 决策:**只读 L3 画像,不读对话历史**(方案 A,实用主义;Sprint 3 再评估)
@@ -22,7 +23,7 @@
 - [x] `ollama show qwen3.5:2b-no-think` + 5 次延迟实证:warmup p95 ≈ 1.5s,cold start 5s,格式遵循差(返回长 markdown 而非查询词)。**修订决策**:改用 `qwen3.5:4b-no-think`(决策 B),实测 warm 300-500ms,100% 遵循 few-shot 格式
 - [x] `grep -rn "search_with_tier" phase3/impl/vector_search.py` —— Sprint 1 已就位,Sprint 2 预测走 `query` 参数传多个预测词
 - [x] `grep -rn "predict" phase3/impl/` —— 只有 `prediction_errors`(V4 反思机制),无"predictive recall"代码,符合"全新模块"判定
-- [x] LLM 调用模式: `no_think=True` 已在 `utils.py:238` 测过 → `qwen3.5:2b-no-think` 命名规范表示已禁用 think,无需额外参数
+- [x] LLM 调用模式: `no_think=True` 已在 `utils.py:238` 测过 → 4b 模型 tag `qwen3.5:4b-no-think` 命名规范表示已禁用 think,但实测仍返回 thinking content(决策 A 修订:必须显式 `think=False`)
 
 **结论**:Sprint 2 是**全新模块**(无既有实现可改),LLM 工具齐全,无需新建基础设施。**唯一改动路径**:`phase3/impl/predictor.py`(新)+ `plugins/memory/hermem/__init__.py` 加 tool + `phase3/impl/llm_router.py`(如需)或直接用 `llm_generate_ollama`。
 
@@ -50,7 +51,7 @@
 
 ### 任务 2.1 — 预测 prompt 工程
 
-**目标**:设计一个 prompt,让 `qwen3.5:2b-no-think` 根据 L3 画像 + 近 3 轮对话,生成 2-3 个预测性查询词。
+**目标**:设计一个 prompt,让 `qwen3.5:4b-no-think`(2026-06-10 决策 8 修订)根据 L3 画像 + 近 3 轮对话,生成 2-3 个预测性查询词。
 
 **涉及文件**:`phase3/impl/predictor.py`(新)
 
@@ -89,7 +90,7 @@ def build_predictive_prompt(
     recent_turns: list[dict],  # [{"role": "user"|"assistant", "content": str}, ...]
     user_query: str,
 ) -> str:
-    """Build prompt for qwen3.5:2b-no-think predictive query generation."""
+    """Build prompt for qwen3.5:4b-no-think predictive query generation."""
     turns_text = "\n".join(
         f"[{t['role']}] {t['content'][:200]}"  # 截断,避免 prompt 过长
         for t in recent_turns[-3:]
@@ -126,7 +127,7 @@ print(p)
 
 ---
 
-### 任务 2.2 — `qwen3.5:2b-no-think` LLM 调用封装(200ms hard timeout)
+### 任务 2.2 — `qwen3.5:4b-no-think` LLM 调用封装(3s hard timeout;2026-06-10 决策 8 + 复核修订)
 
 **目标**:封装一个**严格 200ms timeout** 的 Ollama 调用,超时立即抛 `TimeoutError`,由 2.5 兜底。
 
@@ -137,10 +138,10 @@ print(p)
 import requests
 
 LLM_TIMEOUT_S = 0.25  # 250ms hard limit (决策 1:接受 200ms 太严,给 cold-start 一些余量;Sprint 4 跑 50 条 ground-truth 后再调)
-LLM_MODEL = "qwen3.5:2b-no-think"
+LLM_MODEL = "qwen3.5:4b-no-think"
 
 def call_predictor_llm(prompt: str, timeout: float = LLM_TIMEOUT_S) -> str:
-    """Call qwen3.5:2b-no-think for predictive query generation.
+    """Call qwen3.5:4b-no-think for predictive query generation.
 
     Hard 200ms timeout per SPEC. Exceeds → raise TimeoutError.
     """
@@ -180,7 +181,7 @@ except Exception as e:
 ```
 
 **风险**:
-- 首次冷启动(qwen3.5:2b-no-think 加载)可能 > 200ms → **接受**:冷启动延迟由调用方决定(2.5 兜底返回显式结果)
+- 首次冷启动(qwen3.5:4b-no-think 加载,2026-06-10 决策 8 修订)可能 > 1.5s → **接受**:冷启动延迟由调用方决定(2.5 兜底返回显式结果)
 - 200ms 阈值可能太严 → Sprint 2 跑通后实测,必要的话 Sprint 3 调整
 
 ---
@@ -226,7 +227,7 @@ def generate_predictive_queries(
     recent_turns: list[dict],
     user_query: str,
 ) -> list[str]:
-    """Generate 2-3 predictive queries using qwen3.5:2b-no-think.
+    """Generate 2-3 predictive queries using qwen3.5:4b-no-think.
 
     Returns empty list on any failure (timeout, parse error, etc.).
     Caller is responsible for fallback to explicit-only search.
@@ -515,7 +516,7 @@ print(json.loads(result))
 2. **LLM 调用**(3 个)
    - `test_call_predictor_llm_returns_text`:正常调用 → 返回 LLM 文本
    - `test_call_predictor_llm_raises_on_timeout`:用 1ms timeout → TimeoutError
-   - `test_call_predictor_llm_uses_correct_model`:验证 payload 的 model 字段是 `qwen3.5:2b-no-think`
+   - `test_call_predictor_llm_uses_correct_model`:验证 payload 的 model 字段是 `qwen3.5:4b-no-think`(2026-06-10 决策 8 修订)
 
 3. **解析容错**(4 个)
    - `test_parse_llm_output_normal_lines`:`query1\nquery2\nquery3` → 3 个
@@ -581,7 +582,7 @@ python3 -m pytest v6/tests/test_sprint2_predictor.py -v
 
 | 风险 | 严重度 | 缓解 |
 |---|---|---|
-| qwen3.5:2b-no-think 冷启动 > 200ms | 中 | 接受;2.5 兜底;Sprint 2 跑通后实测 |
+| `qwen3.5:2b-no-think` 冷启动 > 200ms(原 v2.0 假设;2026-06-10 决策 8 修订 4b) | 中 | 接受;2.5 兜底;Sprint 2 跑通后实测(实测 4b cold 1.7-2.0s) |
 | LLM 输出格式不稳定 | 中 | `_parse_llm_output` 容错,空输出 log warn |
 | 显式 + 预测召回不增反降(预测词偏) | 中 | Sprint 4 50 条 ground-truth 评估;不达标则 2.1 prompt 改 |
 | 桥层 `_read_user_profile` / `_get_recent_turns` 不存在 | 中 | Step 0 已 grep;如有缺,2.6 补辅助函数 |
@@ -600,7 +601,7 @@ python3 -m pytest v6/tests/test_sprint2_predictor.py -v
 
 ✅ **Sprint 2 全部 7 任务完成**,见 `eval/sprint2-summary.md`:
 - 2.1-2.7 任务 + 18/18 单元测试 + 端到端 100% 成功
-- 关键决策修订(实测驱动):2b→4b,250ms→1.5s→2s→3s,few-shot examples
+- 关键决策修订(实测驱动):2b→4b(2026-06-10 决策 8),250ms→1.5s→2s→3s,few-shot examples
 - 桥层 commit `3415214c4` 在 `NousResearch/hermes-agent` 本地(未 push,403 权限,待 PR)
 
 ⏭ **Sprint 3 启动**:`phase3/v6/sprint3/TODO.md`(等 Oliver 拍板后另立)
