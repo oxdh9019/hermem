@@ -21,9 +21,9 @@ from .vector_search import search_with_tier
 
 logger = logging.getLogger(__name__)
 
-# ── 配置(Sprint 2 决策 B:4b,实测 warm 300-500ms,cold ~5s,p95 ~1.7s;
-# 2s hard limit 覆盖 warm 100%,cold 走兜底接受)──
-LLM_TIMEOUT_S = 2.0
+# ── 配置(Sprint 2 决策 B 复核修订:4b,实测 cold 1.7-2.0s p95,
+# 2s 撞边界 → 0% 成功率;改 3s 给 p95 + 50% 余量)──
+LLM_TIMEOUT_S = 3.0
 LLM_MODEL = "qwen3.5:4b-no-think"  # 决策 B:2b → 4b(2b 1.5-5.5s 不稳定 + 格式差)
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"  # 原生 API,不走 /v1
 
@@ -223,7 +223,7 @@ def generate_predictive_queries(
     user_profile: str,
     user_query: str,
 ) -> list[str]:
-    """Generate 2-3 predictive queries using qwen3.5:2b-no-think.
+    """Generate 2-3 predictive queries using qwen3.5:4b-no-think.
 
     Returns empty list on any failure (timeout, parse error, etc.).
     Caller is responsible for fallback to explicit-only search.
@@ -231,7 +231,7 @@ def generate_predictive_queries(
     t0 = time.time()
     try:
         prompt = build_predictive_prompt(user_profile, user_query)
-        raw = call_predictor_llm(prompt)
+        raw = call_predictor_llm(prompt, timeout=LLM_TIMEOUT_S)
         latency_ms = (time.time() - t0) * 1000
         _metrics["predictor_latency_ms"].append(latency_ms)
 
@@ -244,7 +244,7 @@ def generate_predictive_queries(
         latency_ms = (time.time() - t0) * 1000
         _metrics["predictor_latency_ms"].append(latency_ms)
         _metrics["predictor_timeout_count"] += 1
-        logger.warning("Predictor LLM timed out (>250ms); returning []")
+        logger.warning(f"Predictor LLM timed out (>{LLM_TIMEOUT_S:.1f}s); returning []")
         return []
     except Exception as e:
         logger.warning(f"Predictor failed: {type(e).__name__}: {e}")
