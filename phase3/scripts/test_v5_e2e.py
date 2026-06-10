@@ -69,7 +69,7 @@ def test_vector_search():
         )
         elapsed = time.time() - t0
 
-        high, medium = search_with_tier(emb_arr, top_k=3)
+        high, medium = search_with_tier(query=None, query_embedding=emb_arr, top_k=3)
         elapsed_total = time.time() - t0
 
         print(f"\n  [{query}] ({elapsed_total * 1000:.1f}ms)")

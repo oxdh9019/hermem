@@ -109,8 +109,80 @@ def _invalidate_cache():
 # ── 初始化 ──────────────────────────────────────────────
 
 
+def _check_lock_orphans() -> dict:
+    """P2 修复（2026-06-06）：启动时检测孤儿 lock。
+
+    fcntl.flock 在 macOS 是 advisory lock，进程死了 fd 不会被自动 GC。
+    如果死进程的 fd 还指向 LOCK_PATH，新进程的 fcntl.flock(LOCK_EX) 会阻塞。
+    之前 30+ 分钟 hang 的次因之一就是这个（gateway 进程死了但 lock fd 残留）。
+
+    Returns:
+        dict: {
+            "lock_path": str,
+            "alive_pids": [int, ...],   # 活进程占用者（正常）
+            "orphan_pids": [int, ...],  # 死进程残留 fd（需要清理）
+        }
+    """
+    if not LOCK_PATH.exists():
+        return {"lock_path": str(LOCK_PATH), "alive_pids": [], "orphan_pids": []}
+
+    import subprocess
+
+    try:
+        # lsof -t = 只返回 PID 列
+        result = subprocess.run(
+            ["lsof", "-t", str(LOCK_PATH)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0 and not result.stdout.strip():
+            # lsof 找不到占用者（rc 1）= lock 空闲
+            return {"lock_path": str(LOCK_PATH), "alive_pids": [], "orphan_pids": []}
+        pids = [int(p) for p in result.stdout.strip().split("\n") if p.strip().isdigit()]
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        logger.warning("lsof 检测 lock 失败: %s", e)
+        return {"lock_path": str(LOCK_PATH), "alive_pids": [], "orphan_pids": [], "error": str(e)}
+
+    alive_pids = []
+    orphan_pids = []
+    for pid in pids:
+        try:
+            os.kill(pid, 0)  # 信号 0 = 检查进程是否还活着，不真杀
+            alive_pids.append(pid)
+        except ProcessLookupError:
+            orphan_pids.append(pid)
+        except PermissionError:
+            # 进程存在但属于其他用户 → 当 alive 处理
+            alive_pids.append(pid)
+
+    if orphan_pids:
+        logger.warning(
+            "LOCK_ORPHAN_DETECTED: %d 个孤儿 fd 残留 (pids=%s)，"
+            "这些进程已死但 .vector_write.lock 仍有 fd 指向它们，"
+            "新进程的 flock(LOCK_EX) 可能会阻塞。"
+            "建议：kill -9 这些 pid 或手动 rm %s",
+            len(orphan_pids),
+            orphan_pids,
+            LOCK_PATH,
+        )
+
+    return {
+        "lock_path": str(LOCK_PATH),
+        "alive_pids": alive_pids,
+        "orphan_pids": orphan_pids,
+    }
+
+
 def init_vectorstore():
-    """初始化向量库（创建空 .npy 文件和元数据）。幂等操作。"""
+    """初始化向量库（创建空 .npy 文件和元数据）。幂等操作。
+
+    P2 修复（2026-06-06）：启动时检测孤儿 lock（死进程残留 fd），
+    检测结果写入返回 dict 的 _lock_status 字段。
+    """
+    # P2: 先检测孤儿 lock — 死进程的 fd 残留会阻塞后续 flock(LOCK_EX)
+    lock_status = _check_lock_orphans()
+
     _load_meta()
     vectors = _load_vectors()
     if not VEC_PATH.exists():
@@ -122,6 +194,7 @@ def init_vectorstore():
         "total_vectors": _meta["next_index"],
         "dim": _meta["dim"],
         "path": str(VEC_PATH),
+        "_lock_status": lock_status,  # P2 新增字段
     }
 
 

@@ -11,6 +11,7 @@ import logging
 import pickle
 import time
 
+import httpx
 import ollama
 
 from . import database
@@ -19,6 +20,14 @@ from . import database
 EMBEDDING_MODEL = "bge-m3:latest"
 OLLAMA_API_BASE = "http://localhost:11434/v1"
 OLLAMA_EMBED_ENDPOINT = f"{OLLAMA_API_BASE}/embeddings"
+
+# P1 修复（2026-06-06）：显式给 ollama.Client 传 httpx timeout
+# 原代码 ollama.embeddings() 的 timeout=30.0 参数是装饰品 — SDK 签名里根本没这参数
+# 实际默认 httpx.Client(timeout=None) → 无限等，就是今天 30+ 分钟 hang 的根因
+# 注意：不要传 host 参数！模块级 ollama.embeddings() 默认 host=127.0.0.1:11434
+# 走原生 /api/embeddings 路径。如果传 host=OLLAMA_API_BASE（含 /v1），
+# SDK 会走 OpenAI 风格路径（404 not found）。
+_ollama_client = ollama.Client(timeout=httpx.Timeout(30.0))
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +69,26 @@ def get_embedding_cached(text: str) -> tuple[list[float], str]:
 
 
 def _call_ollama(text: str, timeout: float = 30.0) -> list[float]:
-    """调用 Ollama bge-m3 生成 embedding。"""
+    """调用 Ollama bge-m3 生成 embedding。
+
+    P1 修复（2026-06-06）：用 _ollama_client 替代裸 ollama.embeddings()，
+    使 timeout=30 真的生效（SDK 默认 httpx timeout=None 是无限等）。
+    支持调用方动态覆盖 timeout（如 health check 用更短）。
+    """
+    if timeout != 30.0:
+        # 调用方要求不同 timeout（如 health check 5s）→ 临时客户端
+        client = ollama.Client(timeout=httpx.Timeout(timeout))
+    else:
+        client = _ollama_client
     try:
-        resp = ollama.embeddings(
+        resp = client.embeddings(
             model=EMBEDDING_MODEL,
             prompt=text[:512],  # bge-m3 建议 max 512 tokens
         )
         return resp["embedding"]
+    except httpx.TimeoutException as e:
+        logger.error(f"Ollama embedding 超时 ({timeout}s): {e}")
+        raise
     except Exception as e:
         logger.error(f"Ollama embedding 失败: {e}")
         raise
