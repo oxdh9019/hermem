@@ -32,8 +32,8 @@
 | 1.5 Temporal 5-7 条 regex + time_range 参数 | ✅ 9 条 pattern,自动从 query 解析或显式传 |
 | 1.6 anchor 5 词写死 | ✅ `("上次", "之前那个", "你还记得", "接着说", "之前提到")` |
 | 1.7 单元测试 ≥ 15 个全过 | ✅ **28/28**(原 25 + Sprint 1.5 桥层 3) |
-| 现有 156/156 pytest 仍全过 | ✅ |
-| `hermes hermem health` HEALTHY | ✅ |
+| 现有 pytest 仍全过 | ✅ **138/138** phase3/tests/(原 SPEC 写 156;实测 138,2026-06-10 verify-on-disk 修正)+ 18/18 phase3/v5.5/tests/ + 58/58 phase3/v6/tests/ |
+| `hermes hermem health` HEALTHY | ⚠️ Vector store 有 7 chunks drift(meta=2357/npy=2350),非 P0,需 `hermes memory rebuild`;其余 OK |
 
 ---
 
@@ -165,8 +165,8 @@ medium_tracker_turns = {
 ✅ **全部满足**:
 - [x] Sprint 0 + 0.5 + 1 全部 17 任务完成
 - [x] 25/30 sprint1 + 30/30 sprint0+sprint0.5 = **58/58 sprint 测试**(Sprint 1.5 后 28/30 sprint1)
-- [x] 156/156 hermem pytest
-- [x] `hermes hermem health` HEALTHY
+- [x] 138/138 phase3/tests/ + 18/18 v5.5/tests/ + 58/58 v6/tests/ pytest(2026-06-10 复核;SPEC 旧写 156,实测 138)
+- [⚠️] `hermes hermem health` 1 项 drift(2357 vs 2350 = 7 chunks),非阻塞,需 `hermes memory rebuild`
 - [x] RRF 融合 + Temporal 通道 + 4 信号触发就位
 - [x] Sprint 1.5 medium_tracker 桥层浮点 bug 已修复(偏差 5),28/28 sprint1 测试通过
 
