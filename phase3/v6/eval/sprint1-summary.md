@@ -33,7 +33,7 @@
 | 1.6 anchor 5 词写死 | ✅ `("上次", "之前那个", "你还记得", "接着说", "之前提到")` |
 | 1.7 单元测试 ≥ 15 个全过 | ✅ **28/28**(原 25 + Sprint 1.5 桥层 3) |
 | 现有 pytest 仍全过 | ✅ **138/138** phase3/tests/(原 SPEC 写 156;实测 138,2026-06-10 verify-on-disk 修正)+ 18/18 phase3/v5.5/tests/ + 58/58 phase3/v6/tests/ |
-| `hermes hermem health` HEALTHY | ⚠️ Vector store 有 7 chunks drift(meta=2357/npy=2350),非 P0,需 `hermes memory rebuild`;其余 OK |
+| `hermes hermem health` HEALTHY | ✅ **HEALTHY**(2026-06-10 rebuild 后 drift 0: meta=2361/npy=2361,11 条 orphan chunk 重新 embed;3 条 query_history 设计上不 embed 不计入 drift) |
 
 ---
 
@@ -47,7 +47,7 @@
 兼容性策略:
 - `query_embedding is None and query is None` → 返回 `([], [])`(旧调用方传 np.ndarray 时仍工作)
 - `query_embedding is None and query` → 自动 encode
-- 旧 156/156 pytest 全过 = 兼容成功
+- 旧 pytest 全过(2026-06-10 verify-on-disk: phase3/tests/ 138/138 + v5.5/tests/ 18/18 + v6/tests/ 58/58;SPEC 旧写 156,实测 138)= 兼容成功
 
 ### 3.2 RRF 阈值切分(决策 5 实施)
 
@@ -166,7 +166,7 @@ medium_tracker_turns = {
 - [x] Sprint 0 + 0.5 + 1 全部 17 任务完成
 - [x] 25/30 sprint1 + 30/30 sprint0+sprint0.5 = **58/58 sprint 测试**(Sprint 1.5 后 28/30 sprint1)
 - [x] 138/138 phase3/tests/ + 18/18 v5.5/tests/ + 58/58 v6/tests/ pytest(2026-06-10 复核;SPEC 旧写 156,实测 138)
-- [⚠️] `hermes hermem health` 1 项 drift(2357 vs 2350 = 7 chunks),非阻塞,需 `hermes memory rebuild`
+- [x] `hermes hermem health` **HEALTHY**(2026-06-10 rebuild 后 drift=0,11 条 orphan chunk 重新 embed;3 条 query_history 设计上不 embed,脚本过滤后不参与 drift 统计)
 - [x] RRF 融合 + Temporal 通道 + 4 信号触发就位
 - [x] Sprint 1.5 medium_tracker 桥层浮点 bug 已修复(偏差 5),28/28 sprint1 测试通过
 
@@ -193,6 +193,14 @@ medium_tracker_turns = {
 ### 不修改
 - chunks_fts 表(Phase 2 已有)
 - 现有 156/156 pytest 全部通过(向后兼容)
+
+### 偏差 6(2026-06-10 rebuild):11 条 orphan chunk 重新 embed 产生冗余 npy 行
+
+**位置**:`phase3/scripts/fix_drift_and_fill_embeddings.py` rebuild 输出
+**现象**:drift 7 → 0,但 npy 多了 11 行(2350 → 2361)。11 个高 vec_index (2350-2360) 的 chunk 是 7 个 session_summary + 4 个 decision/concept_note/fact(都是原 embed 失败/越界 chunk)。
+**严重度**:**低** — 45KB 冗余,RRF 排序上去重,检索语义不变。
+**未做**:不做 truncate 还原到 2350(成本 1-2h 追原始 vec_index 映射,价值低)。
+**跟进**:Sprint 2 评估时考虑在 check_drift 里加 `vec_index >= npy_rows` vs `vec_index IN 0..npy_rows-1` 区分(让 orphan 检测更精确)。
 
 ---
 

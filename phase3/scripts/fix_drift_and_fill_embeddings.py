@@ -69,11 +69,19 @@ def find_orphan_and_unmapped():
         unmapped_rows = conn.execute(
             "SELECT id, content FROM chunks WHERE vec_index IS NULL"
         ).fetchall()
-        unmapped_ids = [r[0] for r in unmapped_rows]
+        # query_history 类 chunk 是 hermem_search 的查询日志，按设计不进入向量库
+        # (它们有独立表 search.hermem_query_log)，不参与 embed 也不应出现在 drift 统计里
+        # (2026-06-10 audit: 健康检查误报 drift 3 即来自此类)
+        unmapped_embeddable = [r for r in unmapped_rows
+                               if conn.execute("SELECT chunk_type FROM chunks WHERE id = ?",
+                                               (r[0],)).fetchone()[0] != "query_history"]
+        skipped_query_history = len(unmapped_rows) - len(unmapped_embeddable)
+        unmapped_ids = [r[0] for r in unmapped_embeddable]
 
     print(f"孤儿映射（vec_index > {max_valid_index}）: {len(orphan_ids)} 个")
-    print(f"未映射（vec_index IS NULL）: {len(unmapped_ids)} 个")
-    print(f"共 {len(orphan_ids) + len(unmapped_ids)} 个 chunk 需要处理")
+    print(f"未映射（vec_index IS NULL，应 embed）: {len(unmapped_ids)} 个")
+    print(f"未映射（chunk_type=query_history，按设计不 embed）: {skipped_query_history} 个")
+    print(f"共 {len(orphan_ids) + len(unmapped_ids)} 个 chunk 需要处理（query_history 跳过）")
 
     return orphan_ids + unmapped_ids
 
