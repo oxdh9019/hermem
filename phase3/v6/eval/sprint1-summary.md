@@ -174,6 +174,7 @@ medium_tracker_turns = {
 - ✅ 2026-06-10 Oliver 评审通过,本 summary 已审计 + 修正 + 文档归档完成
 - ✅ 2026-06-10 `phase3/v6/sprint2/TODO.md` 已写(7 任务,589 行,Step 0 现状核查 + 任务详述 + 验收 + 风险)
 - ✅ 2026-06-10 Sprint 2 全部 7 任务完成,`eval/sprint2-summary.md` 写好(7 任务 + 6 偏差 + 7 学习 + 启动 Sprint 3 条件);commit `81ebc95` + 复核修订 `cbb0bf7` 已 push `oxdh9019/hermem`
+- ✅ 2026-06-10 `phase3/v6/sprint3/TODO.md` 已写(6 任务 + Step 0 现状核查 + 20 测试 + 8 风险;28KB)
 - ⏭ Sprint 2 主题:预测性召回(`qwen3.5:2b-no-think` + L3 画像 + 2-3 预测查询词生成)
 
 ---
