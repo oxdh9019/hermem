@@ -333,6 +333,12 @@ def search_with_tier(
         elif rrf >= 0.01:
             medium.append({**c, "rrf_score": rrf})
 
+    # Sprint 4 任务 4.6:重排(应用 concept_weight)
+    # 注:high/medium 切分在重排前(基于 rrf_score 阈值),重排不破坏这个切分
+    from .reranker import rerank
+    high = rerank(high, top_k=len(high), apply_concept_weight=True)
+    medium = rerank(medium, top_k=len(medium), apply_concept_weight=True)
+
     return high[:top_k], medium[:top_k]
 
 
