@@ -489,8 +489,8 @@ Hermem 是 Hermes Agent 的一个 **memory provider 插件**。本仓库（`oxdh
 
 | 问题 | 说明 | 后续处理 |
 |------|------|---------|
-| **B3 is_recurring_cross_session** | 动态阈值未实现（V4.4 Plan B satisfaction check 绕过，但未完全关闭通路）。目前依赖硬编码阈值。 | 等 satisfaction check 数据积累后决定 |
-| **V4.5 keyword threshold tuning** | `MIN_HITS=2` 保守。等 boost log 积累 1-2 周后调紧到 `max(2, ceil(n_keywords*0.4))`。 | 观察期，待数据驱动 |
+| ~~**B3 is_recurring_cross_session**~~ | ✅ **2026-06-11 已关闭** — V6 Sprint0/0.5/1 引入 RRF + `recall_outcome` + `medium_tracker` 行为闭环替代路径。原设计基于 V4.x disposition 计数，V6 改为基于用户 follow-up 的语义信号，`is_recurring_cross_session` 不再需要实现。 | — |
+| **V4.5 keyword threshold tuning** | ⚠️ **2026-06-11 部分完成** — `MIN_HITS=2` 已从 `l1_search.py` 硬编码提取为 `impl.config.DISPOSITION_BOOST_MIN_HITS` 常量（参数化完成）。Data-driven tuning 公式 `max(2, ceil(n_keywords * 0.4))` 待下次 sprint 跑 boost log 校准脚本（数据已积累 93 条 / 19 天，足够）。 | Boost log sweep |
 
 ---
 

@@ -506,8 +506,8 @@ Full architectural details (background threads, profile safety, conflict resolut
 
 | Issue | Notes | Revisit After |
 |-------|-------|---------------|
-| **B3 is_recurring_cross_session** | Dynamic threshold not implemented. V4.4 Plan B satisfaction check bypasses it but doesn't close the path. Currently relying on hardcoded threshold. | More satisfaction check data |
-| **V4.5 keyword threshold tuning** | `MIN_HITS=2` is conservative. After 1-2 weeks of boost log data, tighten to `max(2, ceil(n_keywords*0.4))`. | Boost log analysis |
+| ~~**B3 is_recurring_cross_session**~~ | ✅ **Closed 2026-06-11** — V6 Sprint0/0.5/1 引入 RRF + `recall_outcome` + `medium_tracker` 行为闭环替代路径。`is_recurring_cross_session` 动态阈值函数未实现也不再需要（原设计基于 V4.x disposition 计数；V6 改为基于用户 follow-up 的语义信号）。 | — |
+| **V4.5 keyword threshold tuning** | ⚠️ **2026-06-11 部分完成** — `MIN_HITS=2` 已从 `l1_search.py` 硬编码提取为 `impl.config.DISPOSITION_BOOST_MIN_HITS` 常量（参数化完成）。Data-driven tuning 公式 `max(2, ceil(n_keywords * 0.4))` 待下次 sprint 跑 boost log 校准脚本（数据已积累 93 条 / 19 天，足够）。 | Boost log sweep
 
 ---
 
@@ -540,6 +540,21 @@ Full architectural details (background threads, profile safety, conflict resolut
 - **Plain text storage**: All memories in readable Markdown, auditable and editable
 - **Progressive disclosure**: Load only relevant memory to avoid context overflow
 - **Self-auditing**: git log, journal, annotations all public
+
+## Cron Prompt Maintenance（2026-06-11 新增）
+
+**背景**：Hermem `48f3a3770234`（Hermem 记忆量提醒）每日推送报告。审计发现 prompt 健康指标集落后 V5/V5.5/V6 共 6 个 sprints 累计 9 个子系统（V6 Sprint0/0.5/1/1.5/2 全部失明）。根因：cron prompt 是 docs 和生产之间的 seam，sprint closeout SOP 默认清单未覆盖。
+
+**Closeout 强制检查（新增）**：每次 sprint closeout 必须包含以下 cron prompt 对齐步骤：
+
+| # | 检查项 | 命令 | 通过条件 |
+|---|--------|------|----------|
+| 1 | prompt 字段名 vs `hermem_stats()` 返回字段 | `grep -E "\{[a-z_]+, vector_count" ~/.hermes/cron/jobs.json` 与 `__init__.py:handle_tool_call("hermem_stats")` 对照 | 字段名一致（避免 `chunk_count` vs `total_chunks` 类错配） |
+| 2 | prompt 是否覆盖本 sprint 新增指标 | 对照本 sprint 引入的新表/字段（如 `l4_reflections`/`pending_conflicts`/`recall_outcome`/`medium_tracker`） | 新指标已加入分层报告 |
+| 3 | README `## Outstanding Issues` 是否同步本 sprint closeout | 对照 `phase3/v{N}/eval/sprint{N}-summary.md` §偏差列表 | 已转录或显式标注"暂无新 outstanding issue" |
+| 4 | 跑一轮 cron 验证输出 | `python3 -c`（设 next_run_at 过去）+ `hermes cron tick --accept-hooks` | 报告格式正确、字段填充、drift 判据生效 |
+
+**参考**：本节基于 `~/.hermes/skills/mlops/hermem-version-plans/SKILL.md` 的 "Closeout Default Checklist Includes Docs Sync" 模式扩展（cron prompt 作为 docs 的延伸，但不在原始清单中）。详见该 skill 的 `references/v6-closeout-checklist.md`。
 
 ## License
 
