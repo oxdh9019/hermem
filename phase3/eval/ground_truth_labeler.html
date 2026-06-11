@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Hermem V6 Sprint 4 - Ground-Truth 标注工具</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+         background: #f5f5f7; padding: 20px; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 8px; color: #1d1d1f; }
+  .subtitle { color: #6e6e73; font-size: 13px; margin-bottom: 20px; }
+  .progress-bar { background: #d2d2d7; border-radius: 6px; height: 6px; margin-bottom: 24px; overflow: hidden; }
+  .progress-fill { background: #0071e3; height: 100%; transition: width 0.3s; }
+  .progress-text { font-size: 12px; color: #6e6e73; margin-top: 4px; text-align: right; }
+
+  .card { background: white; border-radius: 12px; padding: 24px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 16px; }
+  .query-section { border-left: 4px solid #0071e3; padding-left: 20px; margin-bottom: 16px; }
+  .query-text { font-size: 18px; font-weight: 600; color: #1d1d1f; margin-bottom: 4px; }
+  .query-meta { font-size: 12px; color: #6e6e73; }
+
+  .chunks { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .chunk { background: #fafafc; border: 2px solid #e5e5ea; border-radius: 8px;
+           padding: 10px; cursor: pointer; transition: all 0.15s; position: relative; }
+  .chunk:hover { border-color: #0071e3; }
+  .chunk.relevant { background: #d1f4d8; border-color: #34c759; }
+  .chunk.negative { background: #ffe5e5; border-color: #ff3b30; opacity: 0.4; }
+  .chunk-id { font-size: 10px; color: #6e6e73; font-family: monospace; }
+  .chunk-type { display: inline-block; font-size: 9px; padding: 1px 4px; border-radius: 3px;
+                background: #0071e3; color: white; margin-left: 4px; }
+  .chunk-type.decision { background: #ff9500; }
+  .chunk-type.fact { background: #34c759; }
+  .chunk-type.session_summary { background: #8e8e93; }
+  .chunk-type.concept_note { background: #5856d6; }
+  .chunk-content { font-size: 12px; line-height: 1.4; color: #1d1d1f;
+                    margin-top: 4px; max-height: 100px; overflow: hidden;
+                    text-overflow: ellipsis; }
+  .origin-tag { position: absolute; top: 4px; right: 4px; font-size: 9px;
+                background: #0071e3; color: white; padding: 1px 5px;
+                border-radius: 3px; font-weight: 600; }
+  .chunk.relevant .origin-tag { background: #34c759; }
+
+  .controls { display: flex; gap: 12px; margin: 20px 0; align-items: center; }
+  button { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer;
+           font-size: 14px; font-weight: 500; }
+  .btn-primary { background: #0071e3; color: white; }
+  .btn-primary:hover { background: #0058b0; }
+  .btn-secondary { background: #e5e5ea; color: #1d1d1f; }
+  .btn-secondary:hover { background: #d2d2d7; }
+  .btn-danger { background: #ff3b30; color: white; }
+  .btn-skip { background: transparent; color: #6e6e73; }
+  .btn-skip:hover { color: #1d1d1f; }
+
+  .save-status { font-size: 12px; color: #6e6e73; margin-left: auto; }
+  .save-status.saved { color: #34c759; }
+
+  .notes-input { width: 100%; padding: 8px; border: 1px solid #d2d2d7;
+                 border-radius: 6px; font-size: 13px; margin-top: 8px;
+                 font-family: inherit; }
+  .notes-input:focus { outline: none; border-color: #0071e3; }
+
+  .filter-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .filter-btn { padding: 4px 10px; background: #f0f0f0; color: #6e6e73;
+                font-size: 12px; border-radius: 12px; cursor: pointer; border: none; }
+  .filter-btn.active { background: #0071e3; color: white; }
+
+  .help { background: #fff3cd; border-left: 3px solid #ff9500; padding: 8px 12px;
+          font-size: 12px; color: #5a4a00; border-radius: 4px; margin-bottom: 12px; }
+  .help kbd { background: #fff; padding: 1px 4px; border: 1px solid #d2d2d7;
+              border-radius: 3px; font-family: monospace; }
+</style>
+</head>
+<body>
+<h1>🏷️ Hermem V6 Sprint 4 — Ground-Truth 标注工具</h1>
+<div class="subtitle">每条 query 看 6 个候选 chunk,标"哪些相关";AI 推荐 origin(蓝框)优先审核。键盘操作 1/2/←/→/Enter</div>
+
+<div class="help">
+  <b>操作:</b>
+  <b>点击绿色</b> = 该 chunk 相关(应被召回到);<b>点击红色</b> = 该 chunk 不相关;
+  <kbd>1</kbd>=相关 <kbd>2</kbd>=不相关 <kbd>←/→</kbd>=上/下一题 <kbd>Enter</kbd>=保存+下一题;
+  <b>蓝框</b> 是 AI 推荐的 origin chunk(请确认);
+  <b>"没有 ground-truth"</b> 按钮 = 该 query 不适合评测(标 0 相关)。
+</div>
+
+<div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+<div class="progress-text" id="progressText">0 / 21 已标</div>
+
+<div class="card">
+  <div class="query-section">
+    <div class="query-text" id="queryText">Loading...</div>
+    <div class="query-meta" id="queryMeta"></div>
+  </div>
+
+  <div class="chunks" id="chunksGrid"></div>
+
+  <div class="controls">
+    <button class="btn-primary" id="btnNext" onclick="nextQuery()">下一题 →</button>
+    <button class="btn-skip" id="btnSkip" onclick="skipQuery()">⏭ 跳过</button>
+    <button class="btn-danger" id="btnNone" onclick="markNone()">∅ 没有 ground-truth</button>
+    <span class="save-status" id="saveStatus">未保存</span>
+  </div>
+
+  <input type="text" class="notes-input" id="notesInput"
+         placeholder="备注(可选,例: 'origin 正确,额外 2 个相关')" />
+</div>
+
+<div class="filter-row">
+  <button class="filter-btn active" id="filterAll" onclick="filterStatus('all')">全部 21</button>
+  <button class="filter-btn" id="filterPending" onclick="filterStatus('pending')">未标</button>
+  <button class="filter-btn" id="filterDone" onclick="filterStatus('done')">已标</button>
+  <button class="filter-btn" id="filterNone" onclick="filterStatus('none')">已标"无"</button>
+</div>
+
+<div class="card">
+  <h2 style="font-size:16px; margin-bottom:12px;">📊 进度导出</h2>
+  <button class="btn-secondary" onclick="exportJSONL()">📥 导出 ground_truth.jsonl</button>
+  <button class="btn-secondary" onclick="exportAll()">📥 导出全部(含跳过/无)</button>
+  <button class="btn-secondary" onclick="clearAll()">🗑️ 清空所有标注</button>
+  <div id="exportPreview" style="font-size:11px; color:#6e6e73; margin-top:8px; max-height:120px; overflow:auto;"></div>
+</div>
+
+<script>
+let candidates = [];
+let labels = {};
+let currentIdx = 0;
+let currentFilter = 'all';
+let visibleIndices = [];
+
+fetch('ground_truth_label_data.jsonl')
+  .then(r => r.text())
+  .then(text => {
+    candidates = text.trim().split('\n').map(line => JSON.parse(line));
+    const saved = localStorage.getItem('hermem_sprint4_labels');
+    if (saved) labels = JSON.parse(saved);
+    const skipped = JSON.parse(localStorage.getItem('hermem_sprint4_skipped') || '[]');
+    skipped.forEach(qid => { if (!labels[qid]) labels[qid] = { relevant: [], notes: '[SKIPPED]' }; });
+    applyFilter();
+    render();
+  })
+  .catch(e => {
+    document.getElementById('queryText').textContent = '❌ 加载失败: ' + e.message;
+  });
+
+function applyFilter() {
+  visibleIndices = [];
+  candidates.forEach((c, i) => {
+    const lbl = labels[c.query_id];
+    const isDone = lbl && lbl.notes !== '[SKIPPED]' && (lbl.relevant.length > 0 || lbl.notes === 'NONE');
+    const isSkipped = lbl && lbl.notes === '[SKIPPED]';
+    if (currentFilter === 'all') visibleIndices.push(i);
+    else if (currentFilter === 'pending' && !isDone && !isSkipped) visibleIndices.push(i);
+    else if (currentFilter === 'done' && isDone) visibleIndices.push(i);
+    else if (currentFilter === 'none' && lbl && lbl.notes === 'NONE') visibleIndices.push(i);
+  });
+  if (visibleIndices.length === 0) currentIdx = 0;
+  else currentIdx = visibleIndices[0];
+}
+
+function filterStatus(f) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('filter' + f[0].toUpperCase() + f.slice(1)).classList.add('active');
+  applyFilter();
+  render();
+}
+
+function render() {
+  const c = candidates[currentIdx];
+  if (!c) {
+    document.getElementById('queryText').textContent = '🎉 全部标完!用下方"导出"按钮';
+    document.getElementById('chunksGrid').innerHTML = '';
+    return;
+  }
+  document.getElementById('queryText').textContent = c.query;
+  const skipTag = (labels[c.query_id]?.notes === '[SKIPPED]') ? ' (⏭ 已跳过)' :
+                   (labels[c.query_id]?.notes === 'NONE') ? ' (∅ 已标"无")' : '';
+  document.getElementById('queryMeta').textContent =
+    `${c.query_id} · 来源 chunk_id ${c.chunk_origin_id} · origin type ${c.chunk_type_origin}${skipTag}`;
+
+  const grid = document.getElementById('chunksGrid');
+  grid.innerHTML = '';
+  c.candidate_chunks.forEach(cc => {
+    const div = document.createElement('div');
+    div.className = 'chunk';
+    if (cc.is_origin) div.style.borderColor = '#0071e3';
+    div.id = `chunk-${cc.chunk_id}`;
+    const lbl = labels[c.query_id];
+    if (lbl && lbl.relevant && lbl.relevant.includes(cc.chunk_id)) div.classList.add('relevant');
+    div.onclick = () => toggleRelevant(cc.chunk_id);
+    const originBadge = cc.is_origin ? '<div class="origin-tag">AI 推荐</div>' : '';
+    div.innerHTML = `
+      ${originBadge}
+      <div>
+        <span class="chunk-id">#${cc.chunk_id}</span>
+        <span class="chunk-type ${cc.chunk_type}">${cc.chunk_type}</span>
+      </div>
+      <div class="chunk-content">${cc.excerpt}</div>
+    `;
+    grid.appendChild(div);
+  });
+
+  const notesEl = document.getElementById('notesInput');
+  notesEl.value = labels[c.query_id]?.notes || '';
+  notesEl.disabled = (labels[c.query_id]?.notes === '[SKIPPED]');
+
+  updateProgress();
+}
+
+function toggleRelevant(cid) {
+  const qid = candidates[currentIdx].query_id;
+  if (!labels[qid]) labels[qid] = { relevant: [], notes: '' };
+  if (labels[qid].notes === '[SKIPPED]') return;
+  const idx = labels[qid].relevant.indexOf(cid);
+  if (idx >= 0) labels[qid].relevant.splice(idx, 1);
+  else labels[qid].relevant.push(cid);
+  if (labels[qid].notes === 'NONE') labels[qid].notes = '';
+  save();
+  const el = document.getElementById(`chunk-${cid}`);
+  el.classList.toggle('relevant');
+}
+
+function updateProgress() {
+  const total = candidates.length;
+  const done = candidates.filter(c => labels[c.query_id] && labels[c.query_id].notes !== '[SKIPPED]' && (labels[c.query_id].relevant.length > 0 || labels[c.query_id].notes === 'NONE')).length;
+  const skipped = candidates.filter(c => labels[c.query_id]?.notes === '[SKIPPED]').length;
+  const none = candidates.filter(c => labels[c.query_id]?.notes === 'NONE').length;
+  const pending = total - done - skipped;
+  document.getElementById('progressFill').style.width = ((done + skipped) / total * 100) + '%';
+  document.getElementById('progressText').textContent =
+    `${done} 已标 (含 ${none} 标"无") + ${skipped} 跳过 / ${pending} 未标 (共 ${total})`;
+}
+
+function save() {
+  const saveLabels = {};
+  const skipped = [];
+  Object.entries(labels).forEach(([k, v]) => {
+    if (v.notes === '[SKIPPED]') skipped.push(k);
+    else saveLabels[k] = v;
+  });
+  localStorage.setItem('hermem_sprint4_labels', JSON.stringify(saveLabels));
+  localStorage.setItem('hermem_sprint4_skipped', JSON.stringify(skipped));
+  document.getElementById('saveStatus').textContent = '✓ 已自动保存';
+  document.getElementById('saveStatus').classList.add('saved');
+  setTimeout(() => {
+    document.getElementById('saveStatus').classList.remove('saved');
+    document.getElementById('saveStatus').textContent = '自动保存中';
+  }, 1500);
+}
+
+function nextQuery() {
+  const qid = candidates[currentIdx].query_id;
+  const notes = document.getElementById('notesInput').value.trim();
+  if (!labels[qid]) labels[qid] = { relevant: [], notes: '' };
+  if (labels[qid].notes !== '[SKIPPED]') {
+    labels[qid].notes = notes;
+    save();
+  }
+  let nextIdx = -1;
+  for (let i = 0; i < visibleIndices.length; i++) {
+    if (visibleIndices[i] > currentIdx) { nextIdx = visibleIndices[i]; break; }
+  }
+  if (nextIdx === -1) nextIdx = visibleIndices.length > 0 ? visibleIndices[0] : 0;
+  currentIdx = nextIdx;
+  render();
+}
+
+function skipQuery() {
+  const qid = candidates[currentIdx].query_id;
+  labels[qid] = { relevant: [], notes: '[SKIPPED]' };
+  save();
+  updateProgress();
+  nextQuery();
+}
+
+function markNone() {
+  const qid = candidates[currentIdx].query_id;
+  labels[qid] = { relevant: [], notes: 'NONE' };
+  save();
+  updateProgress();
+  nextQuery();
+}
+
+function exportJSONL() {
+  const lines = candidates
+    .filter(c => labels[c.query_id] && labels[c.query_id].notes !== '[SKIPPED]' && labels[c.query_id].notes !== 'NONE' && labels[c.query_id].relevant.length > 0)
+    .map(c => JSON.stringify({
+      query_id: c.query_id,
+      query: c.query,
+      relevant_chunk_ids: labels[c.query_id].relevant,
+      notes: labels[c.query_id].notes || '',
+    }));
+  const blob = new Blob([lines.join('\n')], { type: 'application/x-ndjson' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'ground_truth.jsonl';
+  a.click();
+  URL.revokeObjectURL(url);
+  document.getElementById('exportPreview').textContent = `✓ Exported ${lines.length} rows (有 ground-truth) to ground_truth.jsonl`;
+}
+
+function exportAll() {
+  const lines = candidates
+    .filter(c => labels[c.query_id])
+    .map(c => JSON.stringify({
+      query_id: c.query_id,
+      query: c.query,
+      relevant_chunk_ids: labels[c.query_id].relevant || [],
+      notes: labels[c.query_id].notes || '',
+    }));
+  const blob = new Blob([lines.join('\n')], { type: 'application/x-ndjson' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'ground_truth_all.jsonl';
+  a.click();
+  URL.revokeObjectURL(url);
+  document.getElementById('exportPreview').textContent = `✓ Exported ${lines.length} rows (全部) to ground_truth_all.jsonl`;
+}
+
+function clearAll() {
+  if (confirm('确认清空所有标注?此操作不可恢复。')) {
+    localStorage.removeItem('hermem_sprint4_labels');
+    localStorage.removeItem('hermem_sprint4_skipped');
+    labels = {};
+    applyFilter();
+    render();
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.id === 'notesInput') return;
+  if (e.key === 'ArrowRight' || e.key === 'Enter') nextQuery();
+  if (e.key === 'ArrowLeft') {
+    for (let i = visibleIndices.length - 1; i >= 0; i--) {
+      if (visibleIndices[i] < currentIdx) { currentIdx = visibleIndices[i]; render(); break; }
+    }
+  }
+  if (e.key === '1') {
+    const c = candidates[currentIdx];
+    if (c && c.candidate_chunks.length > 0) toggleRelevant(c.candidate_chunks[0].chunk_id);
+  }
+});
+</script>
+</body>
+</html>

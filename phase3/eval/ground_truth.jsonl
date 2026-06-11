@@ -1,0 +1,20 @@
+{"query_id":"q001","query":"ds2api 工具怎么用？","relevant_chunk_ids":[1129],"notes":""}
+{"query_id":"q002","query":"Agent Harness 架构核心框架是什么？","relevant_chunk_ids":[1086],"notes":""}
+{"query_id":"q003","query":"OpenClaw 导入修复完成了吗？","relevant_chunk_ids":[1149],"notes":""}
+{"query_id":"q004","query":"创作类任务流程 Oliver 确认过吗？","relevant_chunk_ids":[1558],"notes":""}
+{"query_id":"q005","query":"ConeGraph 四层结构对 Hermem V5/V6 有参考价值吗？","relevant_chunk_ids":[1508],"notes":""}
+{"query_id":"q006","query":"微信消息只能发一张图吗？","relevant_chunk_ids":[14],"notes":""}
+{"query_id":"q007","query":"连环画三视图生成最佳实践是什么？","relevant_chunk_ids":[16],"notes":""}
+{"query_id":"q008","query":"Hermem V4.2 Oliver 消息检测问题？","relevant_chunk_ids":[1148],"notes":""}
+{"query_id":"q009","query":"用户说应该归到 Y 会触发修正吗？","relevant_chunk_ids":[1438],"notes":""}
+{"query_id":"q010","query":"Hermem V5 开发策略是什么？","relevant_chunk_ids":[1642],"notes":""}
+{"query_id":"q011","query":"Hermem V5 核心方案是什么？","relevant_chunk_ids":[1648],"notes":""}
+{"query_id":"q013","query":"OpenClaw 本地运行怎么设置？","relevant_chunk_ids":[2285],"notes":""}
+{"query_id":"q014","query":"Oliver 知识库图片链接修复来源？","relevant_chunk_ids":[1439],"notes":""}
+{"query_id":"q015","query":"turn_judgments.jsonl脚本执行失败原因？","relevant_chunk_ids":[1839],"notes":""}
+{"query_id":"q016","query":"微博监控技能如何绕过反爬限制？","relevant_chunk_ids":[1415],"notes":""}
+{"query_id":"q017","query":"judgment 脚本提取事实成功吗？","relevant_chunk_ids":[2149],"notes":""}
+{"query_id":"q018","query":"Phase2技能升级完成了吗？","relevant_chunk_ids":[409],"notes":""}
+{"query_id":"q019","query":"上午 StoryAgent 项目执行如何？","relevant_chunk_ids":[3,83,82,76,77,75],"notes":""}
+{"query_id":"q020","query":"微博监控技能如何绕过 IP 封禁？","relevant_chunk_ids":[639],"notes":""}
+{"query_id":"q021","query":"执行 turn_judgments.jsonl脚本成功了吗？","relevant_chunk_ids":[1914,2089,1973,2342,2341],"notes":""}

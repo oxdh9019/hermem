@@ -1,0 +1,384 @@
+{
+  "ground_truth": "eval/ground_truth.jsonl",
+  "top_k": 5,
+  "predictive": false,
+  "queries_count": 20,
+  "per_query": [
+    {
+      "query_id": "q001",
+      "query": "ds2api 工具",
+      "relevant": [
+        1129
+      ],
+      "retrieved_top_k": [
+        722,
+        1129,
+        557,
+        49,
+        2293
+      ],
+      "hit_top_k": true,
+      "recall_at_k": 1.0,
+      "mrr": 0.5,
+      "latency_ms": 129.0
+    },
+    {
+      "query_id": "q002",
+      "query": "Agent Harness 架构核心框架",
+      "relevant": [
+        1086
+      ],
+      "retrieved_top_k": [
+        1235,
+        721,
+        1086,
+        461,
+        1585
+      ],
+      "hit_top_k": true,
+      "recall_at_k": 1.0,
+      "mrr": 0.33,
+      "latency_ms": 5.0
+    },
+    {
+      "query_id": "q003",
+      "query": "OpenClaw 导入修复完成了吗",
+      "relevant": [
+        1149
+      ],
+      "retrieved_top_k": [
+        442,
+        449,
+        448,
+        727,
+        267
+      ],
+      "hit_top_k": false,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "latency_ms": 3.0
+    },
+    {
+      "query_id": "q004",
+      "query": "创作类任务流程 Oliver 确认过吗",
+      "relevant": [
+        1558
+      ],
+      "retrieved_top_k": [
+        4,
+        10,
+        1130,
+        494,
+        1131
+      ],
+      "hit_top_k": false,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "latency_ms": 2.0
+    },
+    {
+      "query_id": "q005",
+      "query": "ConeGraph 四层结构对 Hermem V5/V6 有参考价值吗",
+      "relevant": [
+        1508
+      ],
+      "retrieved_top_k": [
+        737,
+        1508,
+        2296,
+        1741,
+        1357
+      ],
+      "hit_top_k": true,
+      "recall_at_k": 1.0,
+      "mrr": 0.5,
+      "latency_ms": 3.0
+    },
+    {
+      "query_id": "q006",
+      "query": "微信消息只能发一张图吗",
+      "relevant": [
+        14
+      ],
+      "retrieved_top_k": [
+        15,
+        287,
+        428,
+        427,
+        292
+      ],
+      "hit_top_k": false,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "latency_ms": 2.0
+    },
+    {
+      "query_id": "q007",
+      "query": "连环画三视图生成最佳实践",
+      "relevant": [
+        16
+      ],
+      "retrieved_top_k": [
+        17,
+        16,
+        422,
+        424,
+        421
+      ],
+      "hit_top_k": true,
+      "recall_at_k": 1.0,
+      "mrr": 0.5,
+      "latency_ms": 1.0
+    },
+    {
+      "query_id": "q008",
+      "query": "Hermem V4.2 Oliver 消息检测问题",
+      "relevant": [
+        1148
+      ],
+      "retrieved_top_k": [
+        724,
+        1578,
+        409,
+        1863,
+        402
+      ],
+      "hit_top_k": false,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "latency_ms": 2.0
+    },
+    {
+      "query_id": "q009",
+      "query": "用户说应该归到 Y 会触发修正吗",
+      "relevant": [
+        1438
+      ],
+      "retrieved_top_k": [
+        1228,
+        1438,
+        434,
+        1308,
+        416
+      ],
+      "hit_top_k": true,
+      "recall_at_k": 1.0,
+      "mrr": 0.5,
+      "latency_ms": 2.0
+    },
+    {
+      "query_id": "q010",
+      "query": "Hermem V5 开发策略",
+      "relevant": [
+        1642
+      ],
+      "retrieved_top_k": [
+        717,
+        1642,
+        733,
+        1741,
+        1214
+      ],
+      "hit_top_k": true,
+      "recall_at_k": 1.0,
+      "mrr": 0.5,
+      "latency_ms": 2.0
+    },
+    {
+      "query_id": "q011",
+      "query": "Hermem V5 核心方案",
+      "relevant": [
+        1648
+      ],
+      "retrieved_top_k": [
+        717,
+        1648,
+        1235,
+        1741,
+        1158
+      ],
+      "hit_top_k": true,
+      "recall_at_k": 1.0,
+      "mrr": 0.5,
+      "latency_ms": 1.0
+    },
+    {
+      "query_id": "q013",
+      "query": "OpenClaw 本地运行怎么设置",
+      "relevant": [
+        2285
+      ],
+      "retrieved_top_k": [
+        449,
+        2095,
+        267,
+        2295,
+        304
+      ],
+      "hit_top_k": false,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "latency_ms": 1.0
+    },
+    {
+      "query_id": "q014",
+      "query": "Oliver 知识库图片链接修复来源",
+      "relevant": [
+        1439
+      ],
+      "retrieved_top_k": [
+        6,
+        4,
+        725,
+        1439,
+        495
+      ],
+      "hit_top_k": true,
+      "recall_at_k": 1.0,
+      "mrr": 0.25,
+      "latency_ms": 1.0
+    },
+    {
+      "query_id": "q015",
+      "query": "turn_judgments.jsonl脚本执行失败原因",
+      "relevant": [
+        1839
+      ],
+      "retrieved_top_k": [
+        2341,
+        1975,
+        2342,
+        1755,
+        2328
+      ],
+      "hit_top_k": false,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "latency_ms": 2.0
+    },
+    {
+      "query_id": "q016",
+      "query": "微博监控技能如何绕过反爬限制",
+      "relevant": [
+        1415
+      ],
+      "retrieved_top_k": [
+        2336,
+        2343,
+        1264,
+        2257,
+        1226
+      ],
+      "hit_top_k": false,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "latency_ms": 1.0
+    },
+    {
+      "query_id": "q017",
+      "query": "judgment 脚本提取事实成功吗",
+      "relevant": [
+        2149
+      ],
+      "retrieved_top_k": [
+        2246,
+        1299,
+        2342,
+        1634,
+        2341
+      ],
+      "hit_top_k": false,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "latency_ms": 2.0
+    },
+    {
+      "query_id": "q018",
+      "query": "Phase2技能升级完成了吗",
+      "relevant": [
+        409
+      ],
+      "retrieved_top_k": [
+        11,
+        783,
+        1348,
+        409,
+        728
+      ],
+      "hit_top_k": true,
+      "recall_at_k": 1.0,
+      "mrr": 0.25,
+      "latency_ms": 1.0
+    },
+    {
+      "query_id": "q019",
+      "query": "上午 StoryAgent 项目执行",
+      "relevant": [
+        3,
+        75,
+        76,
+        77,
+        82,
+        83
+      ],
+      "retrieved_top_k": [
+        76,
+        83,
+        77,
+        75,
+        3
+      ],
+      "hit_top_k": true,
+      "recall_at_k": 0.83,
+      "mrr": 1.0,
+      "latency_ms": 1.0
+    },
+    {
+      "query_id": "q020",
+      "query": "微博监控技能如何绕过 IP 封禁",
+      "relevant": [
+        639
+      ],
+      "retrieved_top_k": [
+        2257,
+        1264,
+        1545,
+        1226,
+        2191
+      ],
+      "hit_top_k": false,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "latency_ms": 1.0
+    },
+    {
+      "query_id": "q021",
+      "query": "执行 turn_judgments.jsonl脚本成功了吗",
+      "relevant": [
+        1914,
+        1973,
+        2089,
+        2341,
+        2342
+      ],
+      "retrieved_top_k": [
+        2342,
+        2089,
+        2341,
+        1973,
+        2328
+      ],
+      "hit_top_k": true,
+      "recall_at_k": 0.8,
+      "mrr": 1.0,
+      "latency_ms": 2.0
+    }
+  ],
+  "summary": {
+    "recall_at_k": 0.5316666666666667,
+    "hit_at_k": 0.55,
+    "mrr": 0.29166666666666663,
+    "latency_p50": 1.7321109771728516,
+    "latency_p95": 129.32515144348145
+  }
+}
