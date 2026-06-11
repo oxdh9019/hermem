@@ -10,7 +10,7 @@ import re
 import threading
 from datetime import datetime as _dt
 
-from .config import DB_PATH
+from .config import DB_PATH, DISPOSITION_BOOST_MIN_HITS
 from .usage_tracker import update_l1_facts_usage_async
 from .utils import (
     cosine_sim,
@@ -125,7 +125,9 @@ def disposition_aware_rerank(
             content = fact.get("content", "") or ""
             content_lower = content.lower()
             hits = sum(1 for kw in condition_keywords if len(kw) > 1 and kw in content_lower)
-            if hits >= 2:  # 至少命中 2 个关键词
+            if (
+                hits >= DISPOSITION_BOOST_MIN_HITS
+            ):  # 至少命中 N 个关键词（N 从 config 读，便于 data-driven tuning）
                 fact["_sim"] = fact["_sim"] * boost_factor
                 fact["_disposition_boost"] = True
                 boosted = True

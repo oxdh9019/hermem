@@ -43,7 +43,9 @@ ERROR_ANNOTATION_MODEL = "MiniMax-M2.7"  # 可切换到 qwen3.5:9b-q4_K_M 做对
 # Fallback: 本地 Ollama，primary 不可用时自动降级
 # 注：与 LLM_MODEL (qwen3.5:4b-no-think) 互补 — 后者用于通用 pipeline
 LLM_PRIMARY_MODEL = "MiniMax-M2.7"
-LLM_FALLBACK_MODEL = "qwen3.5:4b-no-think"  # 2026-06-10 全面复核修订:fallback 统一用 4b,不再用 qwen2.5:3b
+LLM_FALLBACK_MODEL = (
+    "qwen3.5:4b-no-think"  # 2026-06-10 全面复核修订:fallback 统一用 4b,不再用 qwen2.5:3b
+)
 
 ERROR_ANNOTATION_PROMPT = """你是一个严格的预测误差审计系统。请基于**对话原文中的明确内容**，逐条识别助手（Hermes）作出的**可被证伪的预测或隐含假设**，并与实际结果对比。
 
@@ -330,3 +332,22 @@ ACTIVE_RETRIEVAL_TOP_K = 3  # 每次最多注入 3 条
 ACTIVE_RETRIEVAL_FREQUENCY = 3  # 每 N 条消息触发一次（0=禁用）
 EMBEDDING_MODEL = "bge-m3:latest"  # 向量模型（复用现有 EMBED_MODEL）
 BATCH_SIZE = 32  # 批量 embedding 尺寸
+
+# ── V4.5 Disposition Boost 关键词阈值 ─────────────────────────────
+# disposition_aware_rerank 中路径2（condition 关键词命中 content）的最小命中数。
+# 历史（硬编码在 l1_search.py 中）：MIN_HITS=2 保守。
+# 2026-06-11 参数化 + 数据驱动校准：boost log 93 条样本 / 19 天，
+# 推荐公式 max(2, ceil(n_keywords * 0.4))，作为下一步的 data-driven tuning 起点。
+# 当前先用常量固定 2，下个 sprint 跑 boost log 校准脚本后改此处即可，无需改 l1_search.py。
+DISPOSITION_BOOST_MIN_HITS = 2  # 关键词命中数下限（l1_search.py:127 读此值）
+DISPOSITION_BOOST_TUNING_FACTOR = 0.4  # 后续 data-driven tuning 起点公式系数
+DISPOSITION_BOOST_FACTOR = 1.5  # boost 倍数（l1_search.py 签名参数）
+
+# ── Stats Schema 版本号 ──────────────────────────────────────────
+# 当 hermem_stats() 返回字段集变化时，必须 bump 这个版本号。
+# cron_prompt_alignment_check.py 会用这个常量核对 cron prompt 中的占位符。
+# 字段集变更历史：
+#   1.0 - 初始版本（total_chunks / vector_count / ollama_* / model_installed / embedding_cache_entries）
+#   1.1 - （预留）
+#   1.2 - 当前：cron 报告加入 chunk_type 分布 + predictive_recall 4 指标（新增占位符不在 hermem_stats() 返回中，但 prompt 用 SQLite 直读）
+STATS_SCHEMA_VERSION = "1.3"
