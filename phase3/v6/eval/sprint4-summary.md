@@ -34,6 +34,8 @@
 | **2026-06-12 修法后 predictive+norm Recall@5** | **60.3%**(修前 38.2%,+22% 真实 LLM 路径激活) |
 | **修法后 Hit@5** | **70%**(修前 55%,+15%) |
 | **修法后 MRR** | **59.7%**(修前 29.2%,+30%) |
+| **2026-06-12 修根因后**(不需 --normalize_query) | **66.2%(等价 baseline+norm)+ 7 测试验证** |
+| **零向量 retry 机制** | 1 次 retry 覆盖冷启;仍 0/NaN 抛 EmbeddingZeroNormError |
 
 ---
 
@@ -71,7 +73,8 @@
 **严重度**:**P0 灾难** — 65% 数据不可用
 **修法(Sprint 4 任务 4.4 完成)**:`phase3/scripts/reembed_zero_norm.py` 扫零向量 → 调 Ollama bge-m3 重 embed → 写回 npy。**1505/1506 成功,1 条冷启 timeout,总耗时 4 分 16 秒,5.9 chunks/s**。**有效 embedding 从 825 → 2336**。
 **修后效果**:**baseline+norm: 53.2% → 66.2% Recall@5(+13%),Hit@5: 55% → 70%(+15%),MRR: 29.2% → 59.7%(+30%)**。
-**Sprint 4 后续**:`embedding.py` 加 norm=0 / NaN 检测 + 自动 fallback 重 embed(根因修复,本次未做)。
+| Sprint 4 后续 | `embedding.py` 加 norm=0/NaN 检测 + 自动 fallback 重 embed(本次 Sprint 4 任务 4.4 完成)|
+| Sprint 4 后续 | normalize_query 提到 search_with_tier 内置(本次 Sprint 4 任务 4.4 完成,7 个 root_fix 测试验证) |
 
 ### 偏差 3(2026-06-12 发现):predictive 模式 9/9(5) 全 timeout
 
@@ -148,10 +151,15 @@
 - `phase3/v6/eval/sprint4-summary.md` (8.9KB,任务 4.1-4.4 summary + 6 偏差)
 - `/Users/oliver/.hermes/memory/hermem_reembed_log.jsonl` (Hermem 内存目录,re-embed 日志)
 
-### 修改(3)
+### 修改(5)
 - `phase3/impl/predictor.py` (`LLM_TIMEOUT_S`: 3.0 → 5.0)
 - `phase3/impl/reflect.py` (2 处 3.0 → 5.0)
 - `phase3/v6/tests/test_sprint2_predictor.py` (assert LLM_TIMEOUT_S: 3.0 → 5.0)
+- `phase3/impl/vector_search.py` (**修根因 A**:`normalize_query()` 函数 + `search_with_tier` 内置自动 normalize)
+- `phase3/impl/embedding.py` (**修根因 B**:`_call_ollama_with_retry` + `EmbeddingZeroNormError` + norm=0/NaN 检测)
+
+### 新建测试(1 个文件,7 个测试)
+- `phase3/v6/tests/test_sprint4_root_fixes.py` (7 tests:3 normalize + 4 embedding retry/raise)
 
 ### 不修改
 - 现有 255/255 pytest 仍全过

@@ -25,6 +25,28 @@ from typing import Optional
 
 import numpy as np
 
+# ── 工具函数 ────────────────────────────────────────────────────
+
+def normalize_query(q: str) -> str:
+    """Sprint 4 修偏差 1 根因(2026-06-12):去问号 + 问句尾词,避免 BM25 重排。
+
+    例子:
+        'ds2api 工具怎么用？' -> 'ds2api 工具'
+        '连环画三视图生成最佳实践是什么？' -> '连环画三视图生成最佳实践'
+        'Hermem V5 核心方案是什么？' -> 'Hermem V5 核心方案'
+
+    Sprint 4 决策 1:实测 +15% Recall@5(38.2% → 53.2%)。
+    修根因 2026-06-12:从评测脚本提到 search_with_tier 内置,所有调用方零改动。
+    """
+    if not q:
+        return q
+    q = q.replace('?', '').replace('？', '').strip()
+    for suffix in ['是什么', '什么', '怎么用', '如何', '哪些', '哪种']:
+        if q.endswith(suffix):
+            q = q[:-len(suffix)]
+    return q.strip()
+
+
 # ── 路径 & 导入 ───────────────────────────────────────────────────
 HERMEM_PHASE3 = Path(__file__).parent
 sys.path.insert(0, str(HERMEM_PHASE3))
@@ -223,6 +245,11 @@ def search_with_tier(
         K = 60(Hindsight 论文公式 15)
         未出现的 doc:该通道分数为 0
     """
+    # Sprint 4 修偏差 1 根因(2026-06-12):query 预处理内置
+    # BM25/FTS5 对问句尾词("是/什么/怎么")敏感,预处理后 +15% Recall@5
+    if query:
+        query = normalize_query(query)
+
     # 自动 Temporal 解析
     if time_range is None and query:
         time_range = parse_relative_time(query)

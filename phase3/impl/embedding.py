@@ -42,6 +42,10 @@ _proc_cache: dict[str, list[float]] = {}
 def get_embedding_cached(text: str) -> tuple[list[float], str]:
     """获取文本的 embedding（优先进程缓存 > SQLite 缓存 > Ollama）。
 
+    Sprint 4 修偏差 2 根因(2026-06-12):加 norm=0/NaN 检测 + retry。
+    1506/2329 chunk 曾因 Ollama 偶发返回 0 向量,导致永久不可召回。
+    现在 0 向量触发 1 次重试;仍失败抛 EmbeddingZeroNormError,让上层记录 + 跳过。
+
     Returns:
         (embedding, source): source in ("proc_cache", "sqlite_cache", "ollama")
     """
@@ -74,6 +78,10 @@ def _call_ollama(text: str, timeout: float = 30.0) -> list[float]:
     P1 修复（2026-06-06）：用 _ollama_client 替代裸 ollama.embeddings()，
     使 timeout=30 真的生效（SDK 默认 httpx timeout=None 是无限等）。
     支持调用方动态覆盖 timeout（如 health check 用更短）。
+
+    Sprint 4 修偏差 2 根因(2026-06-12):加 norm=0/NaN 检测。
+    Ollama 偶发返回 0 向量(batch 失败/进程重启),以前 0 写入 npy → 永久不可召回。
+    现在检测到 norm=0/NaN → 1 次自动重试(避免冷启瞬态);仍失败抛 EmbeddingZeroNormError。
     """
     if timeout != 30.0:
         # 调用方要求不同 timeout（如 health check 5s）→ 临时客户端
@@ -81,17 +89,50 @@ def _call_ollama(text: str, timeout: float = 30.0) -> list[float]:
     else:
         client = _ollama_client
     try:
-        resp = client.embeddings(
-            model=EMBEDDING_MODEL,
-            prompt=text[:512],  # bge-m3 建议 max 512 tokens
-        )
-        return resp["embedding"]
+        emb = _call_ollama_with_retry(client, text)
+        return emb
     except httpx.TimeoutException as e:
         logger.error(f"Ollama embedding 超时 ({timeout}s): {e}")
         raise
-    except Exception as e:
-        logger.error(f"Ollama embedding 失败: {e}")
-        raise
+
+
+class EmbeddingZeroNormError(Exception):
+    """Ollama 多次重试后仍返回 0 向量(异常根因待查)。"""
+
+
+def _call_ollama_with_retry(client, text: str, max_retries: int = 1) -> list[float]:
+    """Sprint 4 修偏差 2:retry 一次避免偶发 0 向量。"""
+    import numpy as _np
+    last_err = None
+    for attempt in range(max_retries + 1):
+        try:
+            resp = client.embeddings(
+                model=EMBEDDING_MODEL,
+                prompt=text[:512],  # bge-m3 建议 max 512 tokens
+            )
+            emb = resp["embedding"]
+            # norm=0 或 NaN 检测
+            arr = _np.array(emb, dtype="float32")
+            norm = float(_np.linalg.norm(arr))
+            if norm == 0.0 or _np.isnan(arr).any():
+                logger.warning(
+                    f"Ollama embedding 返回异常(norm={norm:.4f}, "
+                    f"has_nan={bool(_np.isnan(arr).any())}); "
+                    f"attempt {attempt+1}/{max_retries+1}"
+                )
+                last_err = f"norm={norm}"
+                continue  # retry
+            return emb
+        except httpx.TimeoutException:
+            raise  # 不 retry timeout
+        except Exception as e:
+            last_err = str(e)
+            logger.error(f"Ollama embedding 失败 attempt {attempt+1}: {e}")
+            continue
+    # 所有 retry 失败
+    raise EmbeddingZeroNormError(
+        f"Ollama embedding returned 0/NaN vector after {max_retries+1} attempts: {last_err}"
+    )
 
 
 def clear_proc_cache():
