@@ -26,8 +26,9 @@ from .vector_search import search_with_tier
 logger = logging.getLogger(__name__)
 
 # ── 配置(Sprint 2 决策 B 复核修订:4b,实测 cold 1.7-2.0s p95,
-# 2s 撞边界 → 0% 成功率;改 3s 给 p95 + 50% 余量)──
-LLM_TIMEOUT_S = 3.0
+# 2s 撞边界 → 0% 成功率;改 3s 给 p95 + 50% 余量;
+# 2026-06-12 Sprint 4 修偏差 2:3s 仍 9/9(5) 全 timeout,改 5s 覆盖 cold 100% + 100% 余量)──
+LLM_TIMEOUT_S = 5.0
 LLM_MODEL = "qwen3.5:4b-no-think"  # 2026-06-10 全面复核规范:调用本地 LLM 一律 4b;决策 B 修订 2b→4b(2b 1.5-5.5s 不稳定 + 格式差)
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"  # 原生 API,不走 /v1
 

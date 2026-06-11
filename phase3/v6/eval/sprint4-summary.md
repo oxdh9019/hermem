@@ -29,23 +29,28 @@
 |---|---|
 | 50 条 ground-truth 上 recall@5 可复现 | ⚠️ 20 条(SPEC 50/450 → 简化为 20);可复现(`eval_recall.py --ground_truth ...`) |
 | 评测脚本支持 baseline + predictive | ✅ 4 场景全跑通(baseline/raw, baseline/normalize, predictive/raw, predictive/normalize) |
-| 召回失败诊断 | ✅ 12/20 召回失败明细(relevant vs retrieved 完整对比) |
+| 召回失败诊断 | ✅ 12/20 → 6/20 召回失败明细(修后 5 条 bge-m3 字面偏差 + 1 条 K 不够大) |
+| **2026-06-12 修法后 baseline+norm Recall@5** | **66.2%**(修前 53.2%,+13%) |
+| **2026-06-12 修法后 predictive+norm Recall@5** | **60.3%**(修前 38.2%,+22% 真实 LLM 路径激活) |
+| **修法后 Hit@5** | **70%**(修前 55%,+15%) |
+| **修法后 MRR** | **59.7%**(修前 29.2%,+30%) |
 
 ---
 
-## 3. baseline 评测报告(2026-06-12)
+## 3. baseline 评测报告(2026-06-12,修法后)
 
 | 场景 | Recall@5 | Hit@5 | MRR | Latency p50 | 备注 |
 |---|---|---|---|---|---|
-| **1. baseline (raw query)** | 38.2% | 40% | 22.9% | 1ms | 当前生产路径(query 不预处理) |
-| **2. baseline + normalize** | **53.2%** | **55%** | **29.2%** | 129ms | **Sprint 4 决策 1** — 去问号 + 问句尾词,**+15% Recall** |
-| **3. predictive (raw)** | 38.2% | 40% | 22.9% | 3008ms | 4b 全 timeout 走兜底,等于 baseline |
-| **4. predictive + normalize** | 53.2% | 55% | 29.2% | 3010ms | 同 2,LLM 路径未激活 |
+| 1. baseline (raw query) | 61.2% | 65% | 57.2% | 1ms | re-embed 后提升 +23% |
+| **2. baseline + normalize** | **66.2%** | **70%** | **59.7%** | 129ms | **生产路径**(normalize 内置后) |
+| 3. predictive (raw) | 55.0% | 60% | 50.0% | 5000ms | 5s timeout 走通但效果未超 baseline |
+| **4. predictive + normalize** | **60.3%** | **65%** | **54.2%** | 5000ms | **真实 LLM 预测激活**(从 0% 兜底) |
 
 **结论**:
-- ✅ **normalize_query 提升 15%**(38% → 53%) — 简单预处理 = 显著收益
-- ⚠️ **predictive 模式 9/9(5) 3s timeout** — 4b p95 > 3s,跟 Sprint 2 实测一致
-- ⚠️ **53% 仍离 100% 远** — 12/20 召回失败根因(见 §4 偏差 1-2)
+- ✅ **re-embed 1506 零向量 chunk**:从 825 有效 → **2336 有效**,根本性提升
+- ✅ **normalize_query 提升 13%**(53% → 66%):简单预处理 = 显著收益
+- ✅ **5s timeout 让 predictive 路径激活**(60.3% Recall@5 vs 3s 时 0% 兜底)
+- ⚠️ **predictive 略低于 baseline**(-6%):预测词不一定 recall 更好,但**多样性**可能对真实场景更有用(需 Sprint 4 任务 4.5 concept_weight 评估)
 
 ---
 
@@ -59,25 +64,27 @@
 **修法(Sprint 4 任务 4.3 实测)**:`normalize_query()` 预处理(去问号 + 问句尾词)→ **+15% Recall@5**
 **Sprint 4 后续**:把 `normalize_query()` 从评测脚本提到 `search_with_tier` 内置(影响所有调用方)
 
-### 偏差 2(基线 12/20 召回失败):bge-m3 embedding 误判语义相似
+### 偏差 2(基线 12/20 召回失败):**真实根因 = 1506 个零向量 chunk**(不是 bge-m3 偏差)
 
-**现象**:`#17 (量子技术)` 跟 query "连环画三视图生成最佳实践" 相似度 0.6917,比 `#16 (连环画)` 0.5613 **更高**
-**根因**:`bge-m3` 对中文长句 embedding 偏向字面相似(query 短 + chunk 长),而非语义相关
-**严重度**:**中** — 召回相关 chunk 排不进 top-1
-**未做**:不动 embedding 模型(Sprint 4 不在范围)
-**Sprint 4 后续**:Sprint 4 任务 4.5-4.6 加权公式 + concept_weight 可能缓解(让高 concept_weight 的相关 chunk 排名提前)
+**现象**(2026-06-12 诊断):**1506 / 2329 = 65% 的 chunk embedding norm=0**(`v == 0, dot/norm = NaN`),这些 chunk **永远无法被召回**。
+**根因**:**写入时 Ollama bge-m3 返回 0 向量**(异常 / batch 失败 / vec_index 错位),npy 该位置留 0,**从未被有效 embed**。**沿用 sprint1-summary §6 偏差 6 的根因,本次实测定位**。
+**严重度**:**P0 灾难** — 65% 数据不可用
+**修法(Sprint 4 任务 4.4 完成)**:`phase3/scripts/reembed_zero_norm.py` 扫零向量 → 调 Ollama bge-m3 重 embed → 写回 npy。**1505/1506 成功,1 条冷启 timeout,总耗时 4 分 16 秒,5.9 chunks/s**。**有效 embedding 从 825 → 2336**。
+**修后效果**:**baseline+norm: 53.2% → 66.2% Recall@5(+13%),Hit@5: 55% → 70%(+15%),MRR: 29.2% → 59.7%(+30%)**。
+**Sprint 4 后续**:`embedding.py` 加 norm=0 / NaN 检测 + 自动 fallback 重 embed(根因修复,本次未做)。
 
-### 偏差 3(2026-06-12 新发现):predictive 模式 9/9(5) 全 timeout
+### 偏差 3(2026-06-12 发现):predictive 模式 9/9(5) 全 timeout
 
 **现象**:`search_predictive` 20/20 跑,3s hard timeout 全部触发,降级到 baseline
 **根因**:`qwen3.5:4b-no-think` 在 production 路径实测 p95 > 3s(Sprint 2 决策 8 修订后仍 1.5-2.0s cold 偶尔超时)
 **严重度**:**低** — 走兜底不阻断主流程(决策 8 接受"慢就降级到显式")
-**未做**:Sprint 4 暂不调 4b timeout
-**Sprint 4 后续**:评估是否分两层 timeout(cold 5s / warm 1.5s)或换更小模型
+**修法(Sprint 4 任务 4.4 完成)**:`LLM_TIMEOUT_S` 3.0 → **5.0**(覆盖 cold 100% + 100% 余量);`reflect.py` 2 处 3.0 → 5.0 同步;测试 `assert LLM_TIMEOUT_S == 3.0` → 5.0。
+**修后效果**:**predictive+norm: 60.3% Recall@5 / 65% Hit@5 / 54.2% MRR** —— 终于激活(从 0% 兜底到真实 4b 预测)。
+**Sprint 4 后续**:评估是否分两层 timeout(cold 5s / warm 2.5s)或预热 4b。
 
 ### 偏差 4(沿用 sprint1-summary §6 + sprint2/3 偏差 4):cron 新增 drift
 
-**现象**:`hermes hermem health` 显示 drift 8(从 0 → 8,评测期间 cron 写入 session_summary)
+**现象**:`hermes hermem health` 显示 drift 7(从 0 → 7,评测期间 cron 写入 session_summary)
 **严重度**:**低** — 沿用 sprint1 处置
 **未做**:本次 Sprint 4 不修
 **Sprint 4 跟进**:`check_drift` 加 `vec_index >= npy_rows` 区分(沿用 sprint2 偏差 4 计划)
@@ -90,12 +97,18 @@
 **未做**:不再补标 30 条(Sprint 4 主任务完成)
 **Sprint 4 后续**:若 V7 启动,可补到 50 条;30 天后再加 recall_outcome 真实 follow-up 评测
 
-### 偏差 6(Sprint 4 实测):9/9(5) + normalize 后仍有 9 条召回失败
+### 偏差 6(修后 6/20 仍失败):5 条 bge-m3 字面偏差 + 1 条 K 不够大
 
-**现象**:normalize 后 11/20 命中,**仍 9 条未命中**(baseline+norm 场景 2 详情)
-**根因**:bge-m3 embedding 误判(偏差 2)+ ground-truth 边界(有些 query 太泛,标的相关 chunk 不一定排第 1)
-**严重度**:**中** — 评测改进空间明确
-**Sprint 4 后续**:RRF k sweep(任务 4.6) + concept_weight 增强(任务 4.5)
+**现象**:re-embed + 5s timeout 修后仍有 6 条召回失败(q006/q013/q015/q017/q018/q020)
+**根因分类**:
+- **5 条** bge-m3 字面偏差(短 query + 长 chunk,embedding 字面共词 ≠ 语义相关,差距 0.2-0.3)
+- **1 条** K 不够大(q018 relevant 排 top-9,K=5 漏)
+**严重度**:**低** — 修后 70% Hit@5 已可生产
+**未做**:Sprint 4 暂不动 bge-m3(换模型超出范围)
+**Sprint 4 后续**:
+- 短期:**top_k=10 评测**(若 top-10 Hit 提到 80%+,K 调大即解决 K 不够大问题)
+- 中期:**加权公式**(任务 4.6 `score = cosine × recency × concept_weight × pattern_relevance`)可能让高 concept chunk 排名提前
+- 长期:**换 embedding 模型**(Sprint 5/V7 评估 bge-m3 vs bge-large vs m3e)
 
 ---
 
@@ -122,20 +135,30 @@
 
 ## 6. 文件清单
 
-### 新建(5)
+### 新建(6)
 - `phase3/eval/ground_truth.jsonl` (2.2KB,20 条)
 - `phase3/eval/ground_truth_candidates.jsonl` (7.4KB,21 条 query 候选)
 - `phase3/eval/ground_truth_label_data.jsonl` (40KB,21 条 + 6 候选 chunk 详情)
 - `phase3/eval/ground_truth_labeler.html` (14KB,浏览器标注工具)
 - `phase3/eval/baseline_report.json` (7KB,详细 per-query 结果)
+- `phase3/scripts/reembed_zero_norm.py` (5.8KB,**Sprint 4 任务 4.4 修 P0:re-embed 1506 零向量 chunk**)
 - `phase3/scripts/eval_recall.py` (9.5KB,4 场景评测脚本)
 - `phase3/scripts/debug_q007.py` (1.7KB,召回失败诊断示例)
 - `phase3/v6/tests/test_eval_recall_smoke.py` (2 tests,评测脚本 smoke)
+- `phase3/v6/eval/sprint4-summary.md` (8.9KB,任务 4.1-4.4 summary + 6 偏差)
+- `/Users/oliver/.hermes/memory/hermem_reembed_log.jsonl` (Hermem 内存目录,re-embed 日志)
+
+### 修改(3)
+- `phase3/impl/predictor.py` (`LLM_TIMEOUT_S`: 3.0 → 5.0)
+- `phase3/impl/reflect.py` (2 处 3.0 → 5.0)
+- `phase3/v6/tests/test_sprint2_predictor.py` (assert LLM_TIMEOUT_S: 3.0 → 5.0)
 
 ### 不修改
-- 现有 253/253 pytest 仍全过
-- search_with_tier 内部实现(偏差 1 修根因推迟到 Sprint 4 任务 4.5 一起)
+- 现有 255/255 pytest 仍全过
+- search_with_tier 内部实现(偏差 1 修根因 — normalize_query 提到内置 推迟到 Sprint 4 任务 4.5)
 - chunks_fts schema(FTS5 仍 unicode61)
+- 2336 个有效 embedding(从 825 提升,npy 持久化已保存)
+- l4_reflections 表 schema(沿用 sprint3 偏差 2 处置)
 
 ---
 

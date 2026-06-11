@@ -56,7 +56,7 @@ def test_call_predictor_llm_returns_text():
     """正常调用 → 返回 LLM 文本(4b 模式:done=true 行有完整 content)。"""
     from impl.predictor import call_predictor_llm, LLM_MODEL, LLM_TIMEOUT_S
     assert LLM_MODEL == "qwen3.5:4b-no-think"
-    assert LLM_TIMEOUT_S == 3.0  # 复核修订:2s 撞 p95 边界,3s 给 50% 余量
+    assert LLM_TIMEOUT_S == 5.0  # 复核修订:5s 给 cold 100% 覆盖(Sprint 4 修偏差 2)
     # 跳过网络调用:用 mock
     fake_resp = MagicMock()
     fake_resp.status_code = 200

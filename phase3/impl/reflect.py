@@ -95,7 +95,7 @@ def hermem_reflect(
     from . import predictor as _predictor  # 走模块属性访问,便于 mock
     prompt = REFLECT_ANSWER_PROMPT.format(query=query[:200], context=context[:1500])
     try:
-        answer = _predictor.call_predictor_llm(prompt, timeout=3.0).strip()  # 决策 8:4b + 3s
+        answer = _predictor.call_predictor_llm(prompt, timeout=5.0).strip()  # 决策 8:4b + 3s
     except Exception as e:
         logger.warning(f"hermem_reflect LLM failed: {e}")
         return {
@@ -128,7 +128,7 @@ def hermem_reflect(
                 # 用 4b 把 answer 综合为 L4 元记忆(80 字内)
                 l4_text = _predictor.call_predictor_llm(
                     REFLECT_L4_PROMPT.format(query=query[:200], answer=answer[:500]),
-                    timeout=3.0,
+                    timeout=5.0,
                 ).strip() or None
                 if l4_text:
                     l4_id = write_reflection_immediate(l4_text, session_id)
