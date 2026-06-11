@@ -120,13 +120,35 @@ def write_reflection(reflection_text: str, source_errors: int, confidence: float
             """
             INSERT INTO l4_reflections (reflection_text, source_errors, confidence, expires_at)
             VALUES (?, ?, ?, julianday('now', '+? days'))
-        """,
+            """,
             (reflection_text, source_errors, confidence, L4_REFLECTION_TTL_DAYS),
         )
         conn.commit()
         return cur.lastrowid
     finally:
         conn.close()
+
+
+def write_reflection_immediate(
+    reflection_text: str,
+    session_id: str = "",
+) -> int | None:
+    """V6 Sprint 3 任务 3.5: 写入即时反思(reflect_immediate 路径)。
+
+    跟 write_reflection 的差异:
+    - source_errors = 0(标记为"非批量错误反思",即 reflect_immediate 路径)
+    - confidence 固定 0.7(reflect_immediate 无 errors 计数,中位置信)
+    - session_id 暂记在 reflection_text 头(V6 schema 暂未加 session_id 列)
+    """
+    # 把 session_id 编进 reflection_text 头(后续 Sprint 4 评估可加 session_id 列)
+    text = reflection_text
+    if session_id:
+        text = f"[session={session_id}] " + text
+    return write_reflection(
+        reflection_text=text,
+        source_errors=0,  # 0 = reflect_immediate
+        confidence=0.7,
+    )
 
 
 def get_l4_reflections(max_count: int = 3) -> list[dict]:
