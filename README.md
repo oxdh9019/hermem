@@ -1,389 +1,49 @@
 # Hermem
 
-Hermes lightweight memory enhancement system — L0–L3 hierarchical memory with Predictive Coding (V4).
+> **Hermes 轻量记忆增强插件** — 给 Hermes Agent 加 L0–L3 分层记忆 + 主动检索 + 行为闭环。
+>
+> **V6 complete** (2026-06-12, 7 sprints + 3 P0 fixes). 273/273 tests passing, baseline Recall@5 38.2% → 66.2% (+28%). Production: 2350 vectors / 2276 chunks. Full overview: [`phase3/v6/eval/v6-overview.md`](phase3/v6/eval/v6-overview.md).
 
-**V5.5 v1.0 is live** (2026-05-28, audit-clean 2026-06-01). 1645 chunks embedded with bge-m3, tiered thresholds (high≥0.70/medium≥0.50), session dedup, health + rebuild CLI, weekly L4 reflection + conflict negotiation + active forgetting.
-**V6 complete** (2026-06-12, 7 sprints + 3 P0 fixes). 4-signal trigger + RRF k=60 fusion + Temporal channel + Sprint 1.5 bridge fix + Sprint 2 predictive recall (qwen3.5:4b) + Sprint 3 explainable wrapper + Sprint 4 eval framework (20 ground-truth, 4 scenarios, CI regression). SPEC §0 5 目标全部达成;baseline Recall@5 38.2% → 66.2% (+28%). Full overview: `phase3/v6/eval/v6-overview.md`.
-
----
-
-## Documentation Architecture
-
-The base architecture is **Hermem Phase 2 v3.0** (NumPy + SQLite hybrid storage), with later versions self-contained under `phase3/vN/`. Per-sprint closeout summaries under `phase3/vN/eval/sprint{N}-summary.md`.
-
-| Version | Spec | TODO | Status | Summary |
-|---------|------|------|--------|---------|
-| Phase 1 | `phase1/SPEC.md` | `phase1/TODO.md` | ✅ Done | — |
-| Phase 2 (v3.0 base) | `phase2/SPEC.md` | `phase2/TODO.md` (+ `phase2/TODO-v1.md` legacy) | ✅ Done | — |
-| Phase 3 (L0–L3) | `phase3/SPEC.md` | `phase3/TODO.md` | ✅ Done | — |
-| V5 (active retrieval) | `Hermem-V5-SPEC.md` (top-level) | `Hermem-V5-TODO.md` (top-level) | ✅ Shipped v5.1 | — |
-| V5.5 (meta + conflict + forgetting) | `phase3/v5.5/SPEC.md` | `phase3/v5.5/TODO.md` | ✅ Live (2026-05-28) | — |
-| **V6 (trigger + RRF + Temporal + eval)** | `phase3/v6/SPEC.md` v2.0 | `phase3/v6/TODO.md` + `phase3/v6/sprint{N}/TODO.md` per sprint | **All 7 sprints ✅** (2026-06-12) | `eval/sprint{0,05,1,2,3,4}-summary.md` + `eval/v6-overview.md` |
-
-V6 v2.0 fusion decision table: `phase3/v6/SPEC.md` §1. V6 archive (v1.0–v1.3 drafts): `phase3/v6/archive/`.
+**新用户**:跳到 [§核心能力](#核心能力) 看它能做什么,或 [§快速开始](#快速开始) 5 分钟跑起来。版本演进和 changelog 见 [VERSION_HISTORY.md](VERSION_HISTORY.md)。
 
 ---
 
-## Version History
+## 核心能力
 
-| Version | Name | Description |
-|---------|------|-------------|
-| V1–V3 | Phase 1–3 | L0→L1→L2→L3 pipeline, semantic search — design docs in `phase1/`/`phase2/`/`phase3/` |
-| **V4** | **Predictive Memory** | Memory as generative model, not stored text |
-| **V4.1** | **Error Annotation** | Predict what should happen; tag prediction errors when they don't |
-| **V4.2** | **Conditioned Dispositions** | (condition, prediction, error_history) tuples replacing flat facts |
-| **V4.3** | **Error-Activated Retrieval** | Beta — error signal closes the learning loop |
-| **V4.4** | **Concurrency Fixes** | Vectorstore double-lock, auto_index file lock, watchdog drift monitor |
-| **V4.5** | **Disposition-Aware Rerank** | Boost L1 facts via disposition context — error_count drives retrieval ranking |
-| **V5** | **Active Retrieval** | bge-m3 vector search in-conversation — automatic memory injection during chat |
-| **V5.1** | **Engineering Fixes** | drift=91 fixed, `hermes memory health` + `rebuild` CLI, embedding automation audit (no gaps found) |
-| **V5.5** | **Meta-Cognition + Conflict + Forgetting** | L4 reflection cron (with 14-day TTL refresh), memory conflict negotiation (detection + user-facing `hermem_resolve_conflict` tool), biologically-inspired active forgetting (`user_profile_auto.md` with SHA256 dedup) |
-| **V6** | **On-Demand Trigger + RRF Fusion + Temporal Channel** | 4-signal `_v6_should_trigger()` (medium_accumulated > anchor > temporal > intent > frequency), RRF (k=60) vec+BM25 fusion, 9-regex temporal parser, `hermes hermem stats` CLI, `recall_outcome` behavior loop, Sprint 1.5 bridge float→int fix for `medium_tracker`. Plan: `phase3/v6/SPEC.md` v2.0 (Sprint 0+0.5+1 complete) |
+Hermem 给 Hermes Agent 提供 **6 类记忆能力**,V6 全部上线:
+
+1. **对话中主动找历史记忆** — 不等你问,Agent 自己判断"是不是该查一下过去的对话",命中就注入到 prompt。V6 用 4-signal trigger(`medium_accumulated` / `anchor` / `temporal` / `intent`)判断时机,默认不是每轮检索。
+2. **预测你接下来要查什么** — 用 L3 画像(你的偏好/习惯)+ 近 3 轮对话上下文,本地 LLM(`qwen3.5:4b-no-think`)生成 2-3 个预测查询词,合并到检索管线。
+3. **自然语言过渡句** — 注入历史记忆时不是裸 dump,而是用"上次我们在 X 时间讨论过 Y,这次聊到 Z 顺手提一下"这种模板包裹,可读性优先,LLM 增强 opt-in。
+4. **行为闭环** — 每次 recall 后跟踪你"用没用/忽略/反驳"(`recall_outcome` 表),反哺排序权重。Hermem 越用越准。
+5. **可评测性** — 20 条 ground-truth + 4 场景自动化评测,baseline +28% 的来源可对照 `phase3/v6/eval/` 任何 sprint summary。
+6. **冲突协商 + 主动遗忘** — V5.5 的元认知层:检测新旧记忆矛盾(`hermem_resolve_conflict` 工具),生物学启发的"用得多的保留、用得少的 30 天后降级"。
+
+完整产品定位/技术细节见 [§工作原理](#工作原理) 和 [§高级主题](#高级主题);版本演进/changelog/已知问题见 [VERSION_HISTORY.md](VERSION_HISTORY.md)。
 
 ---
 
-## How Hermem Works
+## 这是给谁用的
 
-```
-Session ends
-    ↓
-L0: Raw transcript archived (JSON)
-    ↓
-L1: Atomic facts extracted (MiniMax-M2.7)
-    ↓ aggregate (embedding similarity ≥ 0.75)
-L2: Scene clusters
-    ↓ stage (preference-type facts)
-L3: user_profile.md confirmation
-    ↓
-Intent Classification (13 intents) → routes to disposition update or retrieval
-    ↓
-Disposition: (condition, prediction, error_count, success_count)
-    ↓ daily synthesis
-Active Memory ← learnings + social learnings fed back to next prompt
-    ↓
-V6 should_trigger (4-signal: medium_accumulated > anchor > temporal > intent) → frequency_fallback
-    ↓
-search_with_tier(query) → RRF (k=60) vec(NumPy) + BM25(FTS5) → high / medium chunks
-    ↓ optional
-Temporal parser (9 regex) → time_range filter on created_at
-```
+**目标用户**:单 Mac mini 上的 Hermes Agent 用户(信任边界=本机单用户)。
 
-**Current data: 1711 vectors (1645 chunks), 22 dispositions, 80 L2 scenes** (as of 2026-06-01).
-**V6 production data (2026-06-10): 2350 vectors (2276 chunks) — drift 7 stale entries, non-P0.**
+**适用范围**:
+- ✅ 已经在用 Hermes Agent,想给对话加长期记忆
+- ✅ 单机本机部署,有 Ollama(`localhost:11434`)跑 bge-m3 embeddings
+- ✅ 接受 SQLite + NumPy 的轻量存储(纯 Python,无重型运行时)
+
+**不适用**:
+- ❌ 多人协作 / 多用户隔离(无 audit log、凭据轮换)
+- ❌ 非 Hermes Agent 场景(本插件与 Hermes gateway 紧耦合)
+- ❌ 云端部署(本机单用户设计,无分布式存储)
+
+如果你的场景不匹配,见 [§设计原则](#设计原则) 了解背景决策。
 
 ---
 
-## Directory Structure
+## 快速开始
 
-```
-hermem/
-│
-├── README.md                     # English version
-├── README_zh.md                # 中文版
-├── QUICKSTART.md                # 5-minute install guide
-├── TROUBLESHOOTING.md         # Common issues + fixes
-├── install.sh                   # Auto-configure plugin directory
-├── requirements.txt             # Minimal dependencies
-│
-├── templates/
-│   └── __init__.py            # Hermes plugin entry (friendly error messages)
-│
-├── phase1/                      # Phase 1 design docs
-├── phase2/                      # Phase 2 design docs
-│
-├── phase3/                      # Phase 3 design + all V1–V6 implementation
-│   ├── impl/                    # ← All active implementation
-│   ├── scripts/                 # Operational scripts (cron-called)
-│   ├── v5.5/                    # V5.5 meta/conflict/forgetting
-│   ├── v6/                      # V6 trigger/RRF/predictive/eval
-│   └── eval/                    # Evaluation scripts
-│
-# Note: Hermes gateway plugin wrapper (`plugins/memory/hermem/`) lives in the
-# separate hermes-agent checkout — see §Hermes Agent Integration below.
-```
-
----
-
-## V5 — Active Retrieval (2026-05-27 → V5.5)
-
-V5 brings **in-conversation memory retrieval** — Hermem proactively searches semantic memory and auto-injects relevant past context without waiting for the user to ask.
-
-V5.1 (2026-05-27) added engineering fixes. V5.5 (2026-05-28) adds meta-cognition, conflict negotiation, and biologically-inspired active forgetting. The 2026-06-01 audit pass closed 14 defects (P0–P2) — see [Changelog](#changelog).
-
-**How it works:**
-```
-User message
-    ↓
-Every N turns (frequency=3): vector search
-    ↓
-Tiered threshold:
-  high (≥0.70): inject immediately, format [自动回忆 - 相似度 X.XX]
-  medium (0.50–0.70): cache, promote if seen again
-  low (<0.50): ignore
-    ↓
-Session dedup: same chunk injected at most once
-```
-
-**Thresholds (tuned 2026-05-27, realigned 2026-06-01):**
-- HIGH: 0.70 (实测最高 0.77, 0.85 无法命中 → 0.70)
-- MEDIUM: 0.50
-- TOP_K: 3 per turn
-- FREQUENCY: every 3 turns
-
-**Key components:**
-- `impl/vector_search.py`: bge-m3 cosine similarity + `search_with_tier()`
-- `impl/embedding.py`: Ollama bge-m3 embeddings, SQLite cached
-- `impl/config.py`: all `ACTIVE_RETRIEVAL_*` flags tunable
-- `phase3/scripts/batch_compute_embeddings.py`: precompute all chunk vectors
-- `phase3/scripts/test_v5_e2e.py`: 8/8 tests passing (verified 2026-06-12)
-- `plugins/memory/hermem/cli.py`: `hermes memory health` + `hermes memory rebuild`
-
-**Phase B status:** V5 Phase B (medium-confidence accumulation trigger) was superseded by V6 Sprint 1's `medium_accumulated` signal — see §V6 4-signal trigger, signal #1.
-
----
-
-## V5.5 — Meta-Cognition, Conflict & Forgetting (2026-05-28, audit-clean 2026-06-01)
-
-V5.5 adds three higher-order memory functions:
-
-### L4 Reflection (Meta-Cognition)
-
-Weekly cron (Sunday 02:30) reads previous day's `prediction_errors`, uses LLM to synthesize meta-memory about user interaction patterns. Written to `l4_reflections` table with 14-day TTL. Each weekly run **refreshes the TTL** of active reflections (so the store stays warm as long as the cron is running) and **purges expired** ones.
-
-**Key components:**
-- `v5.5/impl/l4_reflection.py`: Core synthesis logic
-- `v5.5/impl/llm_helper.py`: Unified LLM entry — primary + fallback routed through `impl.config.LLM_PRIMARY_MODEL` / `LLM_FALLBACK_MODEL` (no hardcoded model names in helpers)
-- `v5.5/cron/cron_weekly_synthesis.py`: Combined weekly job (L4 + consolidation + demotion + TTL refresh)
-
-### Memory Conflict Negotiation
-
-When L1 fact is persisted, detects conflicts against high-confidence dispositions (similarity > 0.75 + semantic contradiction). Writes to `pending_conflicts` table, surfaces a user question via system prompt, and resolves through the new `hermem_resolve_conflict` tool.
-
-**Resolution flow:**
-1. `hermem_add` → async thread → `cr.detect_conflicts()` → `cr.create_pending_conflict()` (DB)
-2. Next turn: `system_prompt_block()` injects the conflict question (with explicit instructions to call `hermem_resolve_conflict`)
-3. Agent calls `hermem_resolve_conflict(resolution, note?)` with one of:
-   - `resolved_new` — archive old disposition/user_profile, keep new
-   - `resolved_existing` — keep old, ignore new
-   - `dismissed` — no real conflict, mark as ignored
-4. `cr.resolve_conflict_with_action()` performs the actual data update
-
-**Key components:**
-- `v5.5/impl/conflict_resolver.py`: detect_conflicts + resolve_conflict_with_action + generate_conflict_question
-- `plugins/memory/hermem/__init__.py`: `HERMEM_RESOLVE_CONFLICT_SCHEMA` + `handle_tool_call` branch + prompt directive
-
-### Biologically-Inspired Active Forgetting
-
-- **Sleep consolidation** (weekly): 高频召回 (usage_count > 5, last_used_at ≥ 7 天) → LLM 归纳 → `user_profile_auto.md` (separate from manual `user_profile.md`, with SHA256 dedup window=5 and rotation at 20 entries)
-- **Active demotion** (weekly): 30 天未召回且 confidence < 0.6 → `is_active=0, archived=1`
-
-**Usage tracking:** `impl/usage_tracker.py` updates `usage_count`/`last_used_at` asynchronously on each retrieve() call. Both the `chunks` dimension and the `l1_facts` dimension are now instrumented (the 2026-06-01 audit found the l1_facts call site was missing).
-
-### Database Changes
-
-```
-hermem.db:
-  l4_reflections        — L4 reflection meta-memory
-  pending_conflicts     — conflict negotiation queue
-  prediction_errors     — raw error signal feeding L4 (now actively populated)
-  chunks: usage_count, last_used_at
-
-l0_l3.db:
-  l1_dispositions: archived, last_used_at, usage_count
-```
-
-### Cron Jobs
-
-The weekly synthesis is registered as a **macOS launchd** job (not a `hermes cron` entry — launchd is more reliable for the 7-day cycle).
-
-```bash
-# Install (run once per machine):
-bash phase3/v5.5/cron/install_weekly_cron.sh install
-
-# Manual trigger for testing:
-bash phase3/v5.5/cron/install_weekly_cron.sh run
-
-# Inspect the loaded job:
-launchctl list | grep hermes.weekly-memory-synthesis
-
-# Uninstall:
-bash phase3/v5.5/cron/install_weekly_cron.sh uninstall
-```
-
-Internally:
-- `com.hermes.weekly-memory-synthesis.plist` — launchd job, Sunday 02:30, with `__HERMES_HOME__` / `__LOG_DIR__` placeholders substituted at install time
-- `run_weekly_synthesis.sh` — wrapper that `cd`s into `phase3/` and invokes `python3 v5.5/cron/cron_weekly_synthesis.py`
-
----
-
-## V6 — On-Demand Trigger + RRF Fusion + Temporal Channel (2026-06-06 → 2026-06-08, audit-clean 2026-06-10)
-
-V6 replaces V5's "search every turn" pattern with a **4-signal gate** that decides when to actually retrieve, plus upgrades the retrieval pipeline to **multi-channel RRF fusion** with optional **temporal filtering**.
-
-### `_v6_should_trigger()` — 4-Signal Decision
-
-Replaces V5's per-turn unconditional search. Priority order (highest wins):
-
-1. **`medium_accumulated`** — same chunk hit medium confidence ≥ 3 times in recent turns (most certain)
-2. **`anchor`** — explicit anaphora keywords (`上次`, `之前那个`, `你还记得`, `接着说`, `之前提到`)
-3. **`temporal`** — query contains time reference (`今天`, `昨天`, `上周`, `三天前`, etc.)
-4. **`intent`** — high-confidence intent classification (≥ 0.85)
-5. **`frequency_fallback`** — every N turns (default 3), regardless of signals above
-
-If no signal fires, **no retrieval happens** — saves embedding compute and avoids noise injection.
-
-**Key components:**
-- `phase3/impl/trigger.py` — `should_trigger(message, intent_confidence, medium_tracker_turns, turn_count) → (bool, source)`
-- `phase3/impl/intent_classifier.py` — `classify_with_confidence()` adds 0-1 confidence heuristic
-- `plugins/memory/hermem/__init__.py` — `_v5_active_retrieval()` rewritten to call `should_trigger` + `search_with_tier`
-
-### RRF Fusion (Vec + BM25)
-
-Two retrieval channels merged via Reciprocal Rank Fusion (k=60):
-
-```
-RRF_score(chunk) = 1/(60 + vec_rank) + 1/(60 + bm25_rank)
-```
-
-- **High tier** (RRF ≥ 0.025): both channels hit, top-3 in at least one
-- **Medium tier** (RRF ≥ 0.01): at least one channel hit, top-10
-
-Threshold tuning deferred to Sprint 4 (50 ground-truth sweep).
-
-**Key components:**
-- `phase3/impl/vector_search.py` — `search_with_tier(query=None, query_embedding=None, top_k=3, time_range=None)` — backward-compatible signature, lazy encodes query
-- FTS5 `chunks_fts` table (already exists from Phase 2 — verified before writing task)
-
-### Temporal Channel
-
-Lazy regex parser extracts time ranges from natural-language queries (no explicit parameter needed):
-
-- 9 patterns: `今天/明天/昨天`, `本周/上周/下周`, `X天前`, `X小时前`, `上次...`, `之前那个...`
-- Auto-parsed when `time_range=None`; explicit override available
-- Failed parse → `time_range=None` (graceful degradation, no error)
-
-**Key component:** `phase3/impl/temporal_parser.py`
-
-### Observability Foundation (Sprint 0)
-
-New `hermes hermem stats` CLI exposes baseline metrics (chunk count, hit rate, inject token, dedup rate). `recall_outcome` table (Sprint 0.5) captures recall → user follow-up behavior, feeding future weight-tuning algorithms.
-
-### Sprint 1.5 Bridge Fix (2026-06-08)
-
-`_v5_medium_tracker` was passing max_similarity float (0-1) as turns to `should_trigger()` — `turns >= 3` was unreachable. **Signal 4 was production-side dead code** (25/25 tests passed because tests bypassed the bridge).
-
-**Fix:** Restructured to `{chunk_id: {"turns": int, "max_sim": float}}` with auto-upgrade from legacy float. 3 regression tests added. See `phase3/v6/eval/sprint1-summary.md` §4 deviation 5.
-
-### P1/P2 Root-Cause Fixes (2026-06-06, committed 2026-06-10)
-
-| Layer | Issue | Fix |
-|-------|-------|-----|
-| `impl/embedding.py` | `ollama.embeddings(timeout=30)` was decorative — SDK default `httpx.Client(timeout=None)` → infinite hang | Explicit `ollama.Client(timeout=httpx.Timeout(30.0))` with caller override |
-| `impl/vectorstore.py` | macOS `flock` is advisory; dead process fd lingers and blocks new `LOCK_EX` | `_check_lock_orphans()` uses `lsof` to detect dead PIDs, log WARNING + cleanup instructions |
-
-### Status (2026-06-12)
-
-| Sprint | Tasks | Status | Summary |
-|--------|-------|--------|---------|
-| Sprint 0 (observability) | 5/5 | ✅ | `eval/sprint0-summary.md` |
-| Sprint 0.5 (behavior data) | 6/6 | ✅ | `eval/sprint05-summary.md` |
-| Sprint 1 (trigger + RRF + Temporal) | 7/7 | ✅ | `eval/sprint1-summary.md` |
-| Sprint 1.5 (bridge float→int fix) | 1 | ✅ | `eval/sprint1-summary.md` §4 deviation 5 |
-| Sprint 2 (predictive recall) | 7 | ✅ | `eval/sprint2-summary.md` |
-| Sprint 3 (explainable wrapper + reflect API) | 6 | ✅ | `eval/sprint3-summary.md` |
-| Sprint 4 (eval framework + ranking + weekly report + CI) | 7 | ✅ | `eval/sprint4-summary.md` |
-
-**Test counts (2026-06-12 verify-on-disk):** 273/273 passing across `phase3/tests/` + `phase3/v5.5/tests/` + `phase3/v6/tests/`. Per-dir: `phase3/tests/` 138, `phase3/v5.5/tests/` 18, `phase3/v6/tests/` 117 (Sprints 1-4 cumulative). `hermes hermem health`: drift 7 (2357 meta vs 2350 npy = 7 stale), non-P0, fix via `hermes memory rebuild`.
-
-Full plan: `phase3/v6/SPEC.md` v2.0. Per-sprint summaries: `phase3/v6/eval/sprint{0,05,1,2,3,4}-summary.md`. V6 收尾总览: `phase3/v6/eval/v6-overview.md` (5KB — 7 sprint + 5 目标 + baseline 38.2%→66.2%).
-
----
-
-## V4 — Predictive Memory
-
-V4 rethinks memory as a **generative model** rather than stored text. Hermem predicts what the user needs, then activates only when the prediction is violated — the error signal drives learning.
-
-### V4.1 — Error Annotation
-
-After each session, annotate with falsifiable predictions that were violated:
-- `prediction_errors[]`: violated predictions
-- `surprise_level`: how unexpected this session was
-- `confidence`: per-error certainty (0–1)
-- `overall_quality_score`: session-level prediction quality (0–1)
-
-### V4.2 — Conditioned Dispositions
-
-`(condition, prediction, confidence, error_history)` replacing flat L1 facts:
-- `condition_text`: when does this pattern activate?
-- `prediction_text`: what does the user expect?
-- `error_count` / `success_count`: tracks prediction accuracy over time
-- `disposition_decay`: time × frequency joint decay (7-day half-life)
-
-### V4.3 — Error-Activated Retrieval
-
-Completes the error-driven learning loop. **End-to-end annotation pipeline verified (2026-05-22).**
-
-**13 Intent Classes:**
-
-| Intent | Description | Action |
-|--------|-------------|--------|
-| 学习/Study | Wants to learn a concept | Trigger recall |
-| 执行/Execute | Clear task instruction | Execute directly |
-| 修正/Correct | Corrects Hermem | Update disposition |
-| 结束/Close | Phase completion | Update summary |
-| 反馈/Feedback | Provides opinion/evaluation | Trigger lightweight annotation |
-| 确认/Confirm | Confirms/approves | Route to execution |
-| 建议/Suggest | Proposes a suggestion | Record as preference |
-| 记忆/Memory | Stores/retrieves memory | Call Hermem |
-| 修改/Modify | Modifies/edits content | Execute modification |
-| 停止/Stop | Stops current operation | Interrupt flow |
-| 提问/Ask | Asks a question | Answer directly |
-| 咨询/Consult | Seeks advice | Generate suggestion |
-| 评估/Evaluate | Judges/evaluates | Provide analysis |
-
-**8 Trigger Conditions:**
-
-| Trigger | Type | Status |
-|---------|------|--------|
-| A1 User explicit negation | strong | ✅ |
-| A2 User partial correction | strong | ✅ |
-| B1 Agent self-correction | strong | ✅ |
-| B2 Agent expresses uncertainty | medium | ✅ |
-| B3 Agent gives up | strong | ✅ |
-| C1 LLM error | — | ⚠️ Awaiting gateway integration |
-| C2 Tool error | — | ⚠️ Awaiting gateway integration |
-| C3 Session-end fallback | — | ✅ Active |
-
-**Daily Loop:**
-- 02:00 — Self-Journal: reads all L0 sessions, writes patterns/errors/solutions
-- 06:00 — Synthesis: compresses learnings into active memory
-
-**Completed:** B1, B2, B4, B5, B6, B8, B9, C3
-**Pending:** B3 (dynamic threshold), C1/C2 (gateway hooks)
-
-### V4.5 — Disposition-Aware Rerank (2026-05-22)
-
-`disposition_aware_rerank()` boosts L1 facts sharing context with top dispositions — dispositions don't just accumulate error_count, they actively rerank what Hermem retrieves.
-
-**Boost paths:**
-1. `l0_ref` exact match — disposition and fact from the same session
-2. Condition keyword → fact content overlap ≥ 2 hits (UUID-format disposition fallback)
-
-**Sprint 4 增补 (2026-06-12):** Concept-weight rerank added on top of disposition boost — `hermem_search` 主路径生效,基于 L2 场景聚类(L2 scene cluster)计算 query 在概念空间中的权重分布,与 V4.5 disposition 提升串联。详见 `phase3/v6/eval/sprint4-summary.md` §1 任务 4.5 + `phase3/v6/SPEC.md` §3 修订段。
-
-### V4.4 — Concurrency Fixes (2026-05-21)
-
-| Phase | Feature | Status |
-|-------|---------|--------|
-| P0 | `append_vectors()` double-lock: `threading.Lock` + `fcntl.flock` | ✅ |
-| P1 | `hermem_auto_index_all.py` file lock | ✅ |
-| P2 | `watchdog_vectorstore.py`: drift detection + `--fix` | ✅ |
-
----
-
-## Quick Start
-
-### Hermem Users (5-minute install)
+**5 分钟上手**(详细指南: [QUICKSTART.md](QUICKSTART.md)):
 
 ```bash
 # 1. Clone Hermem
@@ -392,7 +52,7 @@ git clone https://github.com/oxdh9019/hermem.git ~/hermem
 # 2. Run installer (auto-configures plugin directory + impl symlink)
 cd ~/hermem && ./install.sh
 
-# 3. Initialize vector store (first time only, ~5 min)
+# 3. Initialize vector store (first time only, ~5-10 min for 1700+ chunks)
 python3 ~/hermem/phase3/scripts/batch_compute_embeddings.py
 
 # 4. Configure Hermes to use Hermem
@@ -404,195 +64,185 @@ python3 ~/hermem/phase3/scripts/batch_compute_embeddings.py
 hermes restart
 ```
 
-Full guide: [QUICKSTART.md](QUICKSTART.md) · Troubleshooting: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-
-### Developers (self-host)
-
+**验证安装**:
 ```bash
-git clone https://github.com/oxdh9019/hermem.git
-cd hermem
-
-# Initialize L1/L2/L3 tables
-python3 phase3/impl/db_init.py
-
-# Run daily pipeline (journal 02:00 + synthesis 06:00)
-python3 phase3/cron_daily.py
+hermes memory health    # 检查 embedding 模型/向量 drift/chunk 数量/V5 配置
+python3 ~/hermem/phase3/scripts/test_v5_e2e.py    # 8/8 e2e tests
 ```
+
+**遇到问题**:[TROUBLESHOOTING.md](TROUBLESHOOTING.md) 覆盖 5 个常见场景(模块缺失、软链接断、检索不注入等)。
+
+---
+
+## 工作原理
+
+```
+Session ends
+    ↓
+L0: Raw transcript archived (JSON, ~/.hermes/memory/l0_raw/)
+    ↓
+L1: Atomic facts extracted (LLM)
+    ↓ aggregate (embedding similarity ≥ 0.75)
+L2: Scene clusters
+    ↓ stage (preference-type facts)
+L3: user_profile.md confirmation
+    ↓
+Disposition: (condition, prediction, error_count, success_count)
+    ↓ weekly synthesis (launchd Sunday 02:30)
+Active Memory ← learnings fed back to next prompt
+    ↓
+V6 should_trigger (4-signal) → frequency_fallback
+    ↓
+search_with_tier(query) → RRF (k=60) vec(NumPy) + BM25(FTS5) → high / medium chunks
+    ↓ optional
+Temporal parser (9 regex) → time_range filter on created_at
+```
+
+**关键路径**:V6 4-signal trigger → 检索(vec + BM25 RRF 融合)→ 可选时间过滤 → tiered threshold(高/中/低)→ inject(模板优先,LLM opt-in)→ 行为闭环(`recall_outcome` 反馈)。
+
+**数据层**:`hermem.db`(chunks/embeddings/l4_reflections/pending_conflicts) + `l0_l3.db`(l1_dispositions/l2_scenes/l3_staging) + `hermem_embeddings.npy`(NumPy 向量库) + `user_profile.md`(手动 L3 偏好)+ `user_profile_auto.md`(LLM 自动归纳,带 SHA256 去重)。
+
+**Production 数据**(2026-06-10 verify-on-disk):2350 vectors / 2276 chunks,drift 7(non-P0),`hermes memory rebuild` 可修。
+
+---
+
+## 高级主题
+
+按需深入 — 不读这些也能用 Hermem。
+
+### V6 4-Signal Trigger
+
+不是每轮都检索。V6 用 4 个信号判断时机(命中任一即触发):
+
+1. `medium_accumulated` — 同一 chunk 近期轮次中置信命中 ≥ 3 次(最确定)
+2. `anchor` — 显式指代关键词(`上次`/`之前那个`/`你还记得`/`接着说`/`之前提到`)
+3. `temporal` — query 含时间词(`今天`/`昨天`/`上周`/`三天前` 等)
+4. `intent` — 高置信意图分类(≥ 0.85)
+5. `frequency_fallback` — 每 N 轮(默认 3)兜底,无视上面信号
+
+实现:`phase3/impl/trigger.py:should_trigger()` + 桥层 `_v5_active_retrieval()` 重写。
+
+### RRF 融合(Vec + BM25)
+
+两条检索通道用 Reciprocal Rank Fusion(k=60)合并:
+
+```
+RRF_score(chunk) = 1/(60 + vec_rank) + 1/(60 + bm25_rank)
+```
+
+- **高置信**(RRF ≥ 0.025):双路都命中,至少一路 top-3
+- **中置信**(RRF ≥ 0.01):至少一路命中 top-10
+
+实现:`phase3/impl/vector_search.py:search_with_tier()`(向后兼容签名,支持 `time_range` 参数)。
+
+### 预测性召回 / 可解释包装 / 行为闭环
+
+V6 Sprint 2-4 三块新增能力,代码在 `phase3/v6/impl/`:
+
+- `predictor.py` — `qwen3.5:4b-no-think` 调 L3 画像 + 近 3 轮上下文生成 2-3 预测查询词(`search_predictive()` 整合 RRF 二级融合)
+- `explain.py` + `explain_templates.py` — 6 模板轮转 + `explain_chunk()` 4b 增强 opt-in,默认模板零 LLM 延迟
+- `reflect.py` — `hermem_reflect()` 4 路召回 + 1 次 LLM 综合 + 可选写 L4
+
+行为闭环:`recall_outcome` 表(Sprint 0.5)+ `phase3/v6/eval/` ground-truth 评测框架(Sprint 4 任务 4.5-4.8)。
+
+### 数据模型与 Schema
+
+```
+hermem.db:
+  chunks                    — memory chunks + embedding_cache
+  l4_reflections            — L4 meta-memory (14-day TTL, weekly refresh)
+  pending_conflicts         — 冲突协商队列
+  prediction_errors         — 喂入 L4 的误差信号(已主动写入)
+  chunks.usage_count        — 召回计数(异步更新)
+  chunks.last_used_at       — 最近召回时间
+
+l0_l3.db:
+  l1_dispositions           — (condition, prediction, error_count) 7 天半衰期
+  l2_scenes                 — 场景聚类
+  l3_staging                — 待确认偏好
+  l1_dispositions.archived  — 主动降级标记
+```
+
+`hermem_embeddings.npy` + `.meta.json` 是 NumPy 向量库,`user_profile.md`(手动)和 `user_profile_auto.md`(LLM 自动归纳)是两个分开的 profile 文件。
+
+完整 schema + 迁移:`phase3/v5.5/migrate_v55.py` + `phase3/impl/db_init.py`。
+
+---
+
+## Hermes Agent 集成(桥层)
+
+Hermem 是 Hermes Agent 的一个 **memory provider 插件**。本仓库是实现层(`oxdh9019/hermem`),被一个独立的 **桥接器** 消费:
+
+| 路径 | 角色 |
+|------|------|
+| `~/.hermes/projects/hermem/`(本仓库) | **实现层** — `phase3/impl/` + `phase3/v5.5/impl/` + `phase3/v6/impl/` |
+| `~/.hermes/hermes-agent/plugins/memory/hermem/` | **桥接器 / 插件入口** — `HermemMemoryProvider` 类、tool schemas、后台线程 |
+
+桥接器通过 `_ensure_impl()` 三级 fallback 定位实现:
+1. `__init__.py` 同级的 `./impl/` 软链接(标准安装方式)
+2. `~/.hermes/projects/hermem/phase3`(本机实际路径)
+3. `~/.hermes/projects/hermem-github/phase3`(防御性死分支,本机不存在,silently no-op)
+
+**Tool schemas 暴露给 agent**:`hermem_search`、`hermem_add`、`hermem_forget`、`hermem_stats`、`hermem_resolve_conflict`(2026-06-01 新增)、`hermem_search_predictive`(Sprint 2)、`hermem_explain_chunk`(Sprint 3)、`hermem_reflect`(Sprint 3)。
+
+桥接器的 source of truth 是 `NousResearch/hermes-agent`。本机桥接器 working tree 在 `~/.hermes/hermes-agent/`,但**本 checkout 的改动不会 push 到上游** — 仅作为本地 fork。修改桥接器时请直接编辑本机 hermes-agent 目录中的文件并在那里提交。
+
+完整架构说明(后台线程、profile 安全、冲突解决流程、upgrade preflight checklist)见 `~/.hermes/hermes-agent/plugins/memory/hermem/AGENTS.md`。
+
+---
+
+## 文档地图
+
+| 文档 | 用途 |
+|------|------|
+| [README.md](README.md) | 本文件 — 产品门户(快速开始 + 核心能力) |
+| [README_zh.md](README_zh.md) | 中文版使用说明 |
+| [QUICKSTART.md](QUICKSTART.md) | 5 分钟安装详细步骤 |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | 常见问题排查 |
+| [VERSION_HISTORY.md](VERSION_HISTORY.md) | V1–V6 演进 + sprint 进度 + changelog + 已知问题 + feature status |
+| [CLAUDE.md](CLAUDE.md) | 给 Claude Code 工作时的入口文档(项目结构 + 关键数据 + 桥层细节) |
+| [PROJECT.md](PROJECT.md) | 项目总体介绍(背景、动机、风险) |
+| [phase3/v6/eval/v6-overview.md](phase3/v6/eval/v6-overview.md) | V6 收尾总览(7 sprint + 5 目标 + baseline +28%) |
+| [phase3/v6/eval/sprint{0,05,1,2,3,4}-summary.md](phase3/v6/eval/) | 各 sprint 实际产出 / 偏差 / 经验 |
+| [Hermem-V5-SPEC.md](Hermem-V5-SPEC.md) / [phase3/v5.5/SPEC.md](phase3/v5.5/SPEC.md) / [phase3/v6/SPEC.md](phase3/v6/SPEC.md) | V5 / V5.5 / V6 设计规范 |
+| `phase3/v6/eval/v6-overview.md` | V6 5 目标达成证据链 |
 
 ---
 
 ## Requirements
 
-- Ollama (`localhost:11434`) — bge-m3 for embeddings
-- MiniMax API key (`MINIMAX_CN_API_KEY` in `~/.hermes/.env`) — for error annotation + LLM calls
-- SQLite 3 (Python stdlib)
-
----
-
-## Changelog
-
-### 2026-06-12 — V6 Complete + 全面文档同步 (Commits 4e69b9d + 27770d5)
-
-V6 SPEC §0 5 目标全部达成(7 sprint 完成 + 3 P0 修复),baseline Recall@5 38.2% → 66.2% (+28%)。本文档全面对账 — 入口文档和事实快照全部同步到 2026-06-12 ground truth。
-
-**P0 文档失实修正**(可对照 commit `4e69b9d` 验证):
-- **README 顶部 banner + 文档架构表**: "Sprint 0+0.5+1 ✅; Sprint 2–4 pending" → "All 7 sprints ✅ (2026-06-12)"
-- **README V6 status 表**: Sprint 2/3/4 三行 "❌ Not started" → 实际 ✅ 7/6/7 任务完成
-- **README 测试计数**: 156 → 273(impl 138 + v5.5 18 + v6 117)
-- **README Directory Structure**: 删幽灵 `plugins/` 行(本仓库无此目录,桥层在 hermes-agent),加 phase3/v5.5/、phase3/v6/ 子目录
-- **README Phase B pending** → status(V5 Phase B 已被 V6 Sprint 1 `medium_accumulated` 取代)
-- **README V4.5 段** + Sprint 4 任务 4.5 概念权重重排
-- **CLAUDE.md 顶部版本**: V5.5 → V5.5 + V6 complete,补 `phase3/v6/` 路径 + 目录树修正
-- **CLAUDE.md Key Data**: 1711/1645 → 2350/2276(2026-06-10 V6 production;1711/1645 标为 2026-05-27 baseline)
-- **CLAUDE.md test_v5_e2e**: 7/8 → 8/8(verified 2026-06-12)
-- **PROJECT.md 顶部项目状态**: "规划中" → "V6 完整收尾(2026-06-12,7 sprint,5 目标)"
-- **PROJECT.md 数据快照**: 1264/22/80 (2026-05-21) → 保留 + 新增 "→ 2026-06-10 V6: 2350/2276"
-- **v6-overview.md**: "(本文档) | pending" → "pushed (c779dde)"
-- **QUICKSTART.md**: "1637 个 chunk" → "1700+ 个 chunk 截至 2026-06-10"
-- **TROUBLESHOOTING.md Q5**: "V5 主动检索每 3 轮" → V6 4-signal trigger + frequency_fallback 兜底
-
-**P2 设计文档加注**(可对照 commit `27770d5` 验证):
-- **phase2/SPEC.md / phase3/SPEC.md**: 状态行加"实际完成时间"注(避免 reader 把"待 Oliver 确认后实施"误读为当前状态)
-- **phase3/v6/sprint1/TODO.md**: 三处 156/156 pytest 加基线锚定(2026-06-08 启动基线;2026-06-12 收尾为 273/273)
-
-**未改**(已验证无需改,设计规范/历史归档):
-- `phase3/v6/SPEC.md` / `phase3/v6/TODO.md` / 各 `sprint{N}/TODO.md` 状态行 — 立项视角,由 eval/sprint{N}-summary.md 承载完成状态
-- `bridge_pr/` 引用本地 commit 准确
-- `legacy/phase1_2/README.md` 标 "no longer used",合理
-- `phase1/REVIEW.md` / `phase2/REVIEW.md` 阶段收尾视角,V4-V6 是新增
-
-**Verified on 2026-06-12**: pytest 273/273, e2e 8/8, drift 7 (non-P0), all 10 files clean working tree, 2 commits pushed locally (未 push origin — 等 Oliver 拍板)。
-
-### 2026-06-01 — V5.5 Audit Pass (14 Defects Closed)
-
-Comprehensive audit of the V5.5 codebase against the spec — 14 confirmed defects, all fixed:
-
-**P0 (data correctness)**
-- **P0-1 L4 reflection data vacuum** — `prediction_errors` was never written. Added `_record_prediction_error_v55()` in `disposition_updater.py` writing to `hermem.db.prediction_errors` at the L0-JSON bridge.
-- **P0-2 l1_facts usage_count not updated** — `l1_search.py:retrieve()` now calls `update_l1_facts_usage_async()` after rerank+truncate, matching the `retrieval.py:108-115` pattern that already instrumented the `chunks` dimension.
-- **P0-3 archive semantics** — `active_forgetting.active_demotion` now sets `is_active=0, archived=1` (was only setting `is_active=0`).
-- **P0-4 bridge hardcoded paths** — replaced 8 `Path.home() / ".hermes" / ...` references in `plugins/memory/hermem/__init__.py` with module-level constants resolved via `hermes_constants.get_hermes_home()`.
-
-**P1 (operational hygiene)**
-- **P1-5 cron not registered** — launchd plist + wrapper + `install_weekly_cron.sh` (install/uninstall/run).
-- **P1-6 threshold drift** — aligned `Hermem-V5-SPEC.md` and `phase3/v5/SPEC.md` (and constants in `config.py`) to **HIGH=0.70, MEDIUM=0.50** (was MEDIUM=0.65 in the spec while 0.50 in code).
-- **P1-7 dual-dir clutter** — removed `phase3/v5_5/` symlink, dead `__init__.py` files, and 0-byte `hermem.db` stubs. Restored `phase3/v5.5/impl/__init__.py` as a package marker.
-- **P1-8 user_profile unbounded growth** — `active_forgetting` now writes to a separate `user_profile_auto.md` (not the manual `user_profile.md`), with SHA256 dedup (window=5), rotation (max 20 entries), auto-mkdir, and lowercase+whitespace normalization.
-- **P1-9 commits** — three commits during the pass; `--no-verify` used to bypass the pre-commit hook auto-format conflict (the hook's isort/black normalize clashes with the patch hunks).
-- **P1-10 docs status** — `v5.5/SPEC.md` now reads "已实现 v1.0 (2026-05-28)"; `v5.5/TODO.md` v1.1→v1.2 with score 8.5→9.5/10; `v5/SPEC.md` and `Hermem-V5-SPEC.md` marked "已实现 v5.1".
-
-**P2 (engineering debt)**
-- **P2-11 LLM routing scattered** — `phase3/impl/config.py` now defines `LLM_PRIMARY_MODEL` / `LLM_FALLBACK_MODEL`; `v5.5/impl/llm_helper.py` reads from config instead of hardcoding the strings.
-- **P2-12 L4 reflection TTL never refreshed** — `cron_weekly_synthesis.py` now calls `refresh_active_l4_ttls(14)` before synthesis, extending `expires_at` on active (and legacy `NULL`) reflections each weekly run. End-to-end verified: 2/3 test rows updated, 1 expired skipped.
-- **P2-13 pytest structure gap** — `pyproject.toml` testpaths extended to `["phase3/tests", "phase3/v5.5/tests"]` and pythonpath to `["phase3", "phase3/v5.5"]`. Added `phase3/v5.5/tests/conftest.py`. Root pytest now collects 156 tests.
-- **P2-14 conflict_resolver not exposed to agent** — added `HERMEM_RESOLVE_CONFLICT_SCHEMA` and `handle_tool_call` branch in `plugins/memory/hermem/__init__.py`. The system-prompt question now explicitly directs the agent to call `hermem_resolve_conflict(resolution, note?)`.
-
-### 2026-05-28 — V5.5 Meta-Cognition + Conflict + Forgetting (v1.0)
-
-- **`v5.5/impl/llm_helper.py`**: Unified LLM entry with MiniMax-M2.7 primary + qwen2.5:3b fallback
-- **`v5.5/impl/l4_reflection.py`**: L4 reflection synthesis from prediction_errors, 14-day TTL
-- **`v5.5/impl/conflict_resolver.py`**: Memory conflict detection (similarity > 0.75 + semantic contradiction) + resolve_conflict_with_action
-- **`v5.5/impl/active_forgetting.py`**: Sleep consolidation + active demotion with confidence filtering
-- **`v5.5/cron/cron_weekly_synthesis.py`**: Combined weekly job (L4 + consolidation + demotion)
-- **`v5.5/migrate_v55.py`**: Database migration for hermem.db + l0_l3.db (l4_reflections, pending_conflicts, usage columns)
-- **`phase3/impl/usage_tracker.py`**: Async usage_count/last_used_at updates on retrieve() calls
-- All 7 unit tests passing
-
-### 2026-05-27 — V5.1 Engineering Fixes
-
-- **drift=91 fixed**: meta and npy fully aligned (1711 vectors, 1645 chunks, 0 orphans)
-- **`hermes memory health`**: CLI check for embedding model, vector drift, chunk count, V5 config, ollama daemon
-- **`hermes memory rebuild`**: Idempotent CLI to repair drift and fill missing embeddings
-- **Embedding automation audit**: All `insert_chunk` call sites verified — no gaps found, no new embedding automation needed
-
-### 2026-05-27 — V5 Active Retrieval + Public Beta
-
-- **Phase A complete**: bge-m3 vector search + tiered thresholds + injection + session dedup
-- HIGH threshold: 0.85 → 0.70 (实测最高 0.77)
-- **Public beta release kit**: `install.sh` + `QUICKSTART.md` + `TROUBLESHOOTING.md` + `requirements.txt` + `templates/__init__.py`
-
-### 2026-05-23 — V4.5 Patch (15 Fixes)
-
-### 2026-05-22 — V4.3.1 Patch
-
----
-
-## Hermes Agent Integration (Bridge)
-
-Hermem is a **memory provider plugin** for Hermes Agent. The implementation in this repo (`oxdh9019/hermem`) is consumed by a thin **bridge** that lives in a separate checkout:
-
-| Path | Role |
-|------|------|
-| `~/.hermes/projects/hermem/` (this repo) | **Implementation** — `phase3/impl/` + `phase3/v5.5/impl/` |
-| `~/.hermes/hermes-agent/plugins/memory/hermem/` | **Bridge / plugin entry** — `HermemMemoryProvider` class, tool schemas, background threads |
-
-The bridge discovers the impl via `_ensure_impl()` with a 3-tier fallback:
-
-1. `./impl/` symlink next to `__init__.py` (canonical install)
-2. `~/.hermes/projects/hermem/phase3` (the path used on this machine)
-3. `~/.hermes/projects/hermem-github/phase3` (defensive dead branch — does not exist on this box, silently no-ops)
-
-**Tool schemas exposed to the agent:** `hermem_search`, `hermem_add`, `hermem_forget`, `hermem_stats`, and (as of 2026-06-01) `hermem_resolve_conflict`.
-
-The bridge source of truth is `NousResearch/hermes-agent`. On this machine the bridge working tree lives at `~/.hermes/hermes-agent/`, but **changes are not pushed upstream from this checkout** — they live as a local fork. To edit the bridge, modify the file in the local hermes-agent working tree and commit there.
-
-Full architectural details (background threads, profile safety, conflict resolution flow) are in the bridge's `AGENTS.md` at `plugins/memory/hermem/AGENTS.md` of the hermes-agent checkout.
-
----
-
-## Outstanding Issues
-
-| Issue | Notes | Revisit After |
-|-------|-------|---------------|
-| ~~**B3 is_recurring_cross_session**~~ | ✅ **Closed 2026-06-11** — V6 Sprint0/0.5/1 引入 RRF + `recall_outcome` + `medium_tracker` 行为闭环替代路径。`is_recurring_cross_session` 动态阈值函数未实现也不再需要（原设计基于 V4.x disposition 计数；V6 改为基于用户 follow-up 的语义信号）。 | — |
-| **V4.5 keyword threshold tuning** | ⚠️ **2026-06-11 部分完成** — `MIN_HITS=2` 已从 `l1_search.py` 硬编码提取为 `impl.config.DISPOSITION_BOOST_MIN_HITS` 常量（参数化完成）。Data-driven tuning 公式 `max(2, ceil(n_keywords * 0.4))` 待下次 sprint 跑 boost log 校准脚本（数据已积累 93 条 / 19 天，足够）。 | Boost log sweep
-
----
-
-## Feature Status
-
-| Feature | Status |
-|---------|--------|
-| Phase 1/2 skill layer | ✅ |
-| Phase 3 plugin | ✅ HermemMemoryProvider registered in Hermes config |
-| V4.1 Error Annotation | ✅ MiniMax-M2.7 async queue + `prediction_errors` table now actively populated |
-| V4.2 Conditioned Dispositions | ✅ l1_dispositions table + extract/vector_search/three-tier detection |
-| V4.3 Error-Activated Retrieval | ✅ Beta — B1/B2/B4/B5/B6/B8/B9/C3 complete |
-| V4.4 Concurrency Fixes | ✅ P0/P1/P2 complete |
-| **V5 Active Retrieval** | ✅ Phase A — vector search, injection, dedup done. `hermes memory health` + `rebuild` CLI. Phase B pending. |
-| **V5.5 Meta-Cognition** | ✅ L4 reflection cron + LLM fallback + 14-day TTL + per-week TTL refresh |
-| **V5.5 Conflict Negotiation** | ✅ Full loop: `hermem_add` → detect → pending_conflicts → system-prompt question → `hermem_resolve_conflict` → DB action |
-| **V5.5 Active Forgetting** | ✅ `user_profile_auto.md` (SHA256 dedup) + `active_demotion` (archives on demote) + `usage_tracker` covers both `chunks` and `l1_facts` dimensions |
-| Intent Classifier | ✅ 13 intents + 2-layer architecture |
-| Weekly Synthesis Loop | ✅ launchd plist Sunday 02:30 — L4 + sleep consolidation + active demotion + TTL refresh |
-| Bridge Profile Safety | ✅ All paths via `get_hermes_home()` (no more `Path.home() / ".hermes"` in bridge) |
-| C1/C2 gateway hooks | ⚠️ C3 (session-end) active. C1/C2 defined but awaiting Hermes gateway integration. Non-blocking for V5 active retrieval. |
-| Unit tests | ✅ 273 collected via root pytest (impl 138 + v5.5 18 + v6 117) |
-| CI/CD | ❌ None |
+- **Ollama**(`localhost:11434`) — `bge-m3:latest` for embeddings
+- **MiniMax API key**(`MINIMAX_CN_API_KEY` in `~/.hermes/.env`) — for error annotation + LLM calls
+- **SQLite 3**(Python stdlib)
+- macOS / Linux,Python 3.10+
 
 ---
 
 ## Design Principles
 
-- **Minimal dependencies**: Pure Python + SQLite, no heavy runtimes
-- **Plain text storage**: All memories in readable Markdown, auditable and editable
-- **Progressive disclosure**: Load only relevant memory to avoid context overflow
-- **Self-auditing**: git log, journal, annotations all public
+- **最小依赖**:纯 Python + SQLite,无重型运行时
+- **明文存储**:所有记忆为可读 Markdown,可审计和编辑
+- **渐进披露**:仅加载相关记忆,避免上下文溢出
+- **自我审计**:git log、journal、标注全部公开
 
-## Cron Prompt Maintenance（2026-06-11 新增）
+---
 
-**背景**：Hermem `48f3a3770234`（Hermem 记忆量提醒）每日推送报告。审计发现 prompt 健康指标集落后 V5/V5.5/V6 共 6 个 sprints 累计 9 个子系统（V6 Sprint0/0.5/1/1.5/2 全部失明）。根因：cron prompt 是 docs 和生产之间的 seam，sprint closeout SOP 默认清单未覆盖。
+## Changelog
 
-**Closeout 强制检查（新增）**：每次 sprint closeout 必须包含以下 cron prompt 对齐步骤：
+### 2026-06-12 — V6 Complete + 全面文档同步 (Commits 4e69b9d + 27770d5 + 99cbf97 + 6b0c5fb)
 
-| # | 检查项 | 命令 | 通过条件 |
-|---|--------|------|----------|
-| 1 | prompt 字段名 vs `hermem_stats()` 返回字段 | `grep -E "\{[a-z_]+, vector_count" ~/.hermes/cron/jobs.json` 与 `__init__.py:handle_tool_call("hermem_stats")` 对照 | 字段名一致（避免 `chunk_count` vs `total_chunks` 类错配） |
-| 2 | prompt 是否覆盖本 sprint 新增指标 | 对照本 sprint 引入的新表/字段（如 `l4_reflections`/`pending_conflicts`/`recall_outcome`/`medium_tracker`） | 新指标已加入分层报告 |
-| 3 | README `## Outstanding Issues` 是否同步本 sprint closeout | 对照 `phase3/v{N}/eval/sprint{N}-summary.md` §偏差列表 | 已转录或显式标注"暂无新 outstanding issue" |
-| 4 | 跑一轮 cron 验证输出 | `python3 -c`（设 next_run_at 过去）+ `hermes cron tick --accept-hooks` | 报告格式正确、字段填充、drift 判据生效 |
+V6 SPEC §0 5 目标全部达成(7 sprint 完成 + 3 P0 修复),baseline Recall@5 38.2% → 66.2% (+28%)。
 
-**参考**：本节基于 `~/.hermes/skills/mlops/hermem-version-plans/SKILL.md` 的 "Closeout Default Checklist Includes Docs Sync" 模式扩展（cron prompt 作为 docs 的延伸，但不在原始清单中）。详见该 skill 的 `references/v6-closeout-checklist.md`。
+**本节要点**:
+- 14 项 P0 失实修正:README/CLAUDE/PROJECT/v6-overview/QUICKSTART/TROUBLESHOOTING 顶部状态、数据快照、目录结构、测试计数
+- 3 项 P2 加注:phase2/SPEC、phase3/SPEC 状态行 + sprint1/TODO 3 处 156/156 pytest 基线锚定
+- **README 产品门户化重构(本 commit 6b0c5fb)**:抽出 VERSION_HISTORY.md 独立文档,README 顶部→核心能力 6 bullet→适用用户→快速开始→工作原理→高级主题,560 行 → 250 行(-55%)
+
+**完整 P0/P2 列表**:见 git log `4e69b9d..6b0c5fb` 的 4 个 commit。
+
+更早的 changelog(2026-06-01 V5.5 audit / 2026-05-28 V5.5 / 2026-05-27 V5.1 / 2026-05-22 V4.3.1 等)见 [VERSION_HISTORY.md §Changelog](VERSION_HISTORY.md#changelog)。
+
+---
 
 ## License
 
