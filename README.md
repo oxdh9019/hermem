@@ -431,6 +431,38 @@ python3 phase3/cron_daily.py
 
 ## Changelog
 
+### 2026-06-12 — V6 Complete + 全面文档同步 (Commits 4e69b9d + 27770d5)
+
+V6 SPEC §0 5 目标全部达成(7 sprint 完成 + 3 P0 修复),baseline Recall@5 38.2% → 66.2% (+28%)。本文档全面对账 — 入口文档和事实快照全部同步到 2026-06-12 ground truth。
+
+**P0 文档失实修正**(可对照 commit `4e69b9d` 验证):
+- **README 顶部 banner + 文档架构表**: "Sprint 0+0.5+1 ✅; Sprint 2–4 pending" → "All 7 sprints ✅ (2026-06-12)"
+- **README V6 status 表**: Sprint 2/3/4 三行 "❌ Not started" → 实际 ✅ 7/6/7 任务完成
+- **README 测试计数**: 156 → 273(impl 138 + v5.5 18 + v6 117)
+- **README Directory Structure**: 删幽灵 `plugins/` 行(本仓库无此目录,桥层在 hermes-agent),加 phase3/v5.5/、phase3/v6/ 子目录
+- **README Phase B pending** → status(V5 Phase B 已被 V6 Sprint 1 `medium_accumulated` 取代)
+- **README V4.5 段** + Sprint 4 任务 4.5 概念权重重排
+- **CLAUDE.md 顶部版本**: V5.5 → V5.5 + V6 complete,补 `phase3/v6/` 路径 + 目录树修正
+- **CLAUDE.md Key Data**: 1711/1645 → 2350/2276(2026-06-10 V6 production;1711/1645 标为 2026-05-27 baseline)
+- **CLAUDE.md test_v5_e2e**: 7/8 → 8/8(verified 2026-06-12)
+- **PROJECT.md 顶部项目状态**: "规划中" → "V6 完整收尾(2026-06-12,7 sprint,5 目标)"
+- **PROJECT.md 数据快照**: 1264/22/80 (2026-05-21) → 保留 + 新增 "→ 2026-06-10 V6: 2350/2276"
+- **v6-overview.md**: "(本文档) | pending" → "pushed (c779dde)"
+- **QUICKSTART.md**: "1637 个 chunk" → "1700+ 个 chunk 截至 2026-06-10"
+- **TROUBLESHOOTING.md Q5**: "V5 主动检索每 3 轮" → V6 4-signal trigger + frequency_fallback 兜底
+
+**P2 设计文档加注**(可对照 commit `27770d5` 验证):
+- **phase2/SPEC.md / phase3/SPEC.md**: 状态行加"实际完成时间"注(避免 reader 把"待 Oliver 确认后实施"误读为当前状态)
+- **phase3/v6/sprint1/TODO.md**: 三处 156/156 pytest 加基线锚定(2026-06-08 启动基线;2026-06-12 收尾为 273/273)
+
+**未改**(已验证无需改,设计规范/历史归档):
+- `phase3/v6/SPEC.md` / `phase3/v6/TODO.md` / 各 `sprint{N}/TODO.md` 状态行 — 立项视角,由 eval/sprint{N}-summary.md 承载完成状态
+- `bridge_pr/` 引用本地 commit 准确
+- `legacy/phase1_2/README.md` 标 "no longer used",合理
+- `phase1/REVIEW.md` / `phase2/REVIEW.md` 阶段收尾视角,V4-V6 是新增
+
+**Verified on 2026-06-12**: pytest 273/273, e2e 8/8, drift 7 (non-P0), all 10 files clean working tree, 2 commits pushed locally (未 push origin — 等 Oliver 拍板)。
+
 ### 2026-06-01 — V5.5 Audit Pass (14 Defects Closed)
 
 Comprehensive audit of the V5.5 codebase against the spec — 14 confirmed defects, all fixed:

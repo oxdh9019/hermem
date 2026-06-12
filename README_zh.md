@@ -415,6 +415,20 @@ python3 phase3/cron_daily.py
 
 ## 版本说明
 
+### 2026-06-12 — V6 完整收尾 + 全面文档同步（Commits 4e69b9d + 27770d5）
+
+V6 SPEC §0 5 目标全部达成（7 sprint + 3 P0 修复），baseline Recall@5 38.2% → 66.2% (+28%)。本仓库所有入口文档对账同步到 2026-06-12 ground truth。详见英文版 Changelog 同名段（完整 14 项 P0 失实修正 + 3 项 P2 加注列表）。
+
+**关键同步项**（中文摘要）：
+- README / CLAUDE.md / PROJECT.md / v6-overview.md 顶部版本与状态行统一为 V6 收尾
+- 测试计数 156 → 273（impl 138 + v5.5 18 + v6 117）；e2e 8/8
+- 数据快照 1711/1645 → 2350/2276（V6 production）
+- 删 README Directory Structure 中幽灵 `plugins/` 行（本仓库无此目录）
+- phase2/SPEC.md / phase3/SPEC.md 状态行加"实际完成"注
+- sprint1/TODO.md 三处 156/156 pytest 加基线锚定
+
+**未 push origin** — 2 commit 等 Oliver 拍板。
+
 ### 2026-06-01 — V5.5 审计通过（关闭 14 个缺陷）
 
 对 V5.5 全量代码对照 spec 做了一次彻底审计 — 14 个确认缺陷全部修复：
