@@ -4,7 +4,7 @@
 **阶段**: Phase 2
 **版本**: v1.0
 **日期**: 2026-05-01
-**状态**: 待 Oliver 确认后实施
+**状态**: 待 Oliver 确认后实施（**注**:Phase 2 实际已完成,见 `phase2/TODO.md` 状态行 ✅ + `phase2/REVIEW.md` ✅。本 SPEC 是 V2 阶段设计文档;V3+ 后续迭代见 `phase3/SPEC.md` / V4-V6 各版本 SPEC）
 
 ---
 

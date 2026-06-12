@@ -192,7 +192,7 @@ def search_with_tier(query, query_emb=None, top_k=3, time_range=None) -> tuple[l
 ```
 
 **风险**:
-- 现有 156/156 pytest 全部调旧 `search_with_tier(query_emb, ...)` → 签名变化需兼容或升级测试
+- 现有 156/156 pytest 全部调旧 `search_with_tier(query_emb, ...)` → 签名变化需兼容或升级测试（2026-06-08 启动基线；2026-06-12 收尾为 273/273）
 - FTS5 中文分词(unicode61 不完美,可后续优化)
 - RRF k=60 需 sweep(写一个 50 条 ground-truth 测试脚本,Sprint 4 评测时调)
 
@@ -310,7 +310,7 @@ def _has_anchor(text: str) -> bool:
 6. **Temporal 过滤**(2 个:区间内 / 区间外)
 
 **关键回归测试**:
-- 现有 156/156 pytest 必须全过
+- 现有 156/156 pytest 必须全过（2026-06-08 启动基线；2026-06-12 收尾为 273/273）
 - 30/30 sprint0+sprint0.5 测试必须全过
 - 任何 signature break 都视为 P0
 
@@ -325,7 +325,7 @@ def _has_anchor(text: str) -> bool:
 - [ ] **1.5** Temporal 5-7 条 regex + time_range 参数
 - [ ] **1.6** anchor 5 词写死
 - [ ] **1.7** 单元测试 ≥ 15 个全过
-- [ ] 现有 156/156 pytest 仍全过
+- [ ] 现有 156/156 pytest 仍全过（2026-06-08 启动基线；2026-06-12 收尾为 273/273）
 - [ ] `hermes hermem health` HEALTHY
 - [ ] `phase3/v6/eval/sprint1-summary.md` 追加
 

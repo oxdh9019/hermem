@@ -4,7 +4,7 @@
 **阶段**: Phase 3
 **版本**: v1.0
 **日期**: 2026-05-15
-**状态**: 待 Oliver 确认后实施
+**状态**: 待 Oliver 确认后实施（**注**:Phase 3 实际 2026-05-16 完成,见 `phase3/TODO.md` 状态行 ✅ + `PROJECT.md` v1.0。本 SPEC 是 V3 阶段设计文档,内容已沉淀;V4-V6 后续迭代见 `Hermem-V5-SPEC.md` / `phase3/v5.5/SPEC.md` / `phase3/v6/SPEC.md`）
 
 ---
 
