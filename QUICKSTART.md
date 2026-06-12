@@ -57,7 +57,7 @@ ls -la impl  # 应该显示 -> ~/hermem/phase3/impl
 python3 ~/hermem/phase3/scripts/batch_compute_embeddings.py
 ```
 
-预计 5-10 分钟（1637 个 chunk，每个约 50-80ms）。运行完成后再继续。
+预计 5-10 分钟（**1700+ 个 chunk** 截至 2026-06-10,每个约 50-80ms;早期估算 1637 已过时,实际值会因增量 session 持续增长）。运行完成后再继续。
 
 ### 第六步：配置 Hermes 使用 Hermem
 

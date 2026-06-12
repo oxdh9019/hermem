@@ -4,7 +4,7 @@
 
 **项目名称**: Hermem (Hermes Memory Enhancement)
 **创建时间**: 2026-04-28
-**项目状态**: 规划中
+**项目状态**: V6 完整收尾（2026-06-12，7 sprint 全部完成，5 目标达成）
 
 ### 背景与动机
 
@@ -255,6 +255,7 @@ user_profile.md (confirmed preferences)
 - `phase3/cron_daily.py`: 定时处理脚本（每天 02:00 journal + 06:00 synthesis）
 - cron job: `a70a7eb3bf8d`（journal at 02:00, synthesis at 06:00）
 - 当前数据: **1264 vectors, 22 dispositions (6 model_error + 16 user_behavior), 80 L2 scenes** (2026-05-21, compact-applied)
+- → 2026-06-10 V6 生产数据: **2350 vectors / 2276 chunks**(baseline Recall@5 38.2% → 66.2%,Sprint 4 ground-truth 评测)
 ```
 
 ### 实施步骤

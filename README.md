@@ -3,7 +3,7 @@
 Hermes lightweight memory enhancement system — L0–L3 hierarchical memory with Predictive Coding (V4).
 
 **V5.5 v1.0 is live** (2026-05-28, audit-clean 2026-06-01). 1645 chunks embedded with bge-m3, tiered thresholds (high≥0.70/medium≥0.50), session dedup, health + rebuild CLI, weekly L4 reflection + conflict negotiation + active forgetting.
-**V6 Sprint 0+0.5+1 complete** (2026-06-08, audit-clean 2026-06-10). 4-signal trigger + RRF fusion + Temporal channel + Sprint 1.5 bridge fix. `hermes hermem health` HEALTHY.
+**V6 complete** (2026-06-12, 7 sprints + 3 P0 fixes). 4-signal trigger + RRF k=60 fusion + Temporal channel + Sprint 1.5 bridge fix + Sprint 2 predictive recall (qwen3.5:4b) + Sprint 3 explainable wrapper + Sprint 4 eval framework (20 ground-truth, 4 scenarios, CI regression). SPEC §0 5 目标全部达成;baseline Recall@5 38.2% → 66.2% (+28%). Full overview: `phase3/v6/eval/v6-overview.md`.
 
 ---
 
@@ -18,7 +18,7 @@ The base architecture is **Hermem Phase 2 v3.0** (NumPy + SQLite hybrid storage)
 | Phase 3 (L0–L3) | `phase3/SPEC.md` | `phase3/TODO.md` | ✅ Done | — |
 | V5 (active retrieval) | `Hermem-V5-SPEC.md` (top-level) | `Hermem-V5-TODO.md` (top-level) | ✅ Shipped v5.1 | — |
 | V5.5 (meta + conflict + forgetting) | `phase3/v5.5/SPEC.md` | `phase3/v5.5/TODO.md` | ✅ Live (2026-05-28) | — |
-| **V6 (trigger + RRF + Temporal)** | `phase3/v6/SPEC.md` v2.0 | `phase3/v6/TODO.md` + `phase3/v6/sprint{N}/TODO.md` per sprint | **Sprint 0+0.5+1 ✅**; Sprint 2–4 pending | `eval/sprint{0,05,1}-summary.md` |
+| **V6 (trigger + RRF + Temporal + eval)** | `phase3/v6/SPEC.md` v2.0 | `phase3/v6/TODO.md` + `phase3/v6/sprint{N}/TODO.md` per sprint | **All 7 sprints ✅** (2026-06-12) | `eval/sprint{0,05,1,2,3,4}-summary.md` + `eval/v6-overview.md` |
 
 V6 v2.0 fusion decision table: `phase3/v6/SPEC.md` §1. V6 archive (v1.0–v1.3 drafts): `phase3/v6/archive/`.
 
@@ -89,14 +89,17 @@ hermem/
 │   └── __init__.py            # Hermes plugin entry (friendly error messages)
 │
 ├── phase1/                      # Phase 1 design docs
-├── phase2/                     # Phase 2 design docs
+├── phase2/                      # Phase 2 design docs
 │
-├── phase3/                     # Phase 3 design + all V1–V5 implementation
-│   ├── impl/                  # ← All active implementation
-│   ├── scripts/               # Operational scripts (cron-called)
-│   └── eval/                  # Evaluation scripts
+├── phase3/                      # Phase 3 design + all V1–V6 implementation
+│   ├── impl/                    # ← All active implementation
+│   ├── scripts/                 # Operational scripts (cron-called)
+│   ├── v5.5/                    # V5.5 meta/conflict/forgetting
+│   ├── v6/                      # V6 trigger/RRF/predictive/eval
+│   └── eval/                    # Evaluation scripts
 │
-└── plugins/memory/hermem/     # Hermes gateway plugin wrapper
+# Note: Hermes gateway plugin wrapper (`plugins/memory/hermem/`) lives in the
+# separate hermes-agent checkout — see §Hermes Agent Integration below.
 ```
 
 ---
@@ -132,10 +135,10 @@ Session dedup: same chunk injected at most once
 - `impl/embedding.py`: Ollama bge-m3 embeddings, SQLite cached
 - `impl/config.py`: all `ACTIVE_RETRIEVAL_*` flags tunable
 - `phase3/scripts/batch_compute_embeddings.py`: precompute all chunk vectors
-- `phase3/scripts/test_v5_e2e.py`: 7/8 tests passing
+- `phase3/scripts/test_v5_e2e.py`: 8/8 tests passing (verified 2026-06-12)
 - `plugins/memory/hermem/cli.py`: `hermes memory health` + `hermes memory rebuild`
 
-**Phase B pending:** Medium-confidence accumulation trigger
+**Phase B status:** V5 Phase B (medium-confidence accumulation trigger) was superseded by V6 Sprint 1's `medium_accumulated` signal — see §V6 4-signal trigger, signal #1.
 
 ---
 
@@ -278,20 +281,21 @@ New `hermes hermem stats` CLI exposes baseline metrics (chunk count, hit rate, i
 | `impl/embedding.py` | `ollama.embeddings(timeout=30)` was decorative — SDK default `httpx.Client(timeout=None)` → infinite hang | Explicit `ollama.Client(timeout=httpx.Timeout(30.0))` with caller override |
 | `impl/vectorstore.py` | macOS `flock` is advisory; dead process fd lingers and blocks new `LOCK_EX` | `_check_lock_orphans()` uses `lsof` to detect dead PIDs, log WARNING + cleanup instructions |
 
-### Status (2026-06-10)
+### Status (2026-06-12)
 
 | Sprint | Tasks | Status | Summary |
 |--------|-------|--------|---------|
 | Sprint 0 (observability) | 5/5 | ✅ | `eval/sprint0-summary.md` |
 | Sprint 0.5 (behavior data) | 6/6 | ✅ | `eval/sprint05-summary.md` |
 | Sprint 1 (trigger + RRF + Temporal) | 7/7 | ✅ | `eval/sprint1-summary.md` |
-| Sprint 2 (predictive recall) | — | ❌ Not started | — |
-| Sprint 3 (explainable wrapper) | — | ❌ Not started | — |
-| Sprint 4 (eval framework) | — | ❌ Not started | — |
+| Sprint 1.5 (bridge float→int fix) | 1 | ✅ | `eval/sprint1-summary.md` §4 deviation 5 |
+| Sprint 2 (predictive recall) | 7 | ✅ | `eval/sprint2-summary.md` |
+| Sprint 3 (explainable wrapper + reflect API) | 6 | ✅ | `eval/sprint3-summary.md` |
+| Sprint 4 (eval framework + ranking + weekly report + CI) | 7 | ✅ | `eval/sprint4-summary.md` |
 
-**Test counts (2026-06-10 verify-on-disk):** `phase3/v6/tests/` 58/58, `phase3/tests/` 138/138, `phase3/v5.5/tests/` 18/18. `hermes hermem health`: 1 non-P0 drift (2357 meta vs 2350 npy = 7 stale), fix via `hermes memory rebuild`.
+**Test counts (2026-06-12 verify-on-disk):** 273/273 passing across `phase3/tests/` + `phase3/v5.5/tests/` + `phase3/v6/tests/`. Per-dir: `phase3/tests/` 138, `phase3/v5.5/tests/` 18, `phase3/v6/tests/` 117 (Sprints 1-4 cumulative). `hermes hermem health`: drift 7 (2357 meta vs 2350 npy = 7 stale), non-P0, fix via `hermes memory rebuild`.
 
-Full plan: `phase3/v6/SPEC.md` v2.0. Per-sprint summaries: `phase3/v6/eval/sprint{0,05,1}-summary.md`.
+Full plan: `phase3/v6/SPEC.md` v2.0. Per-sprint summaries: `phase3/v6/eval/sprint{0,05,1,2,3,4}-summary.md`. V6 收尾总览: `phase3/v6/eval/v6-overview.md` (5KB — 7 sprint + 5 目标 + baseline 38.2%→66.2%).
 
 ---
 
@@ -364,6 +368,8 @@ Completes the error-driven learning loop. **End-to-end annotation pipeline verif
 **Boost paths:**
 1. `l0_ref` exact match — disposition and fact from the same session
 2. Condition keyword → fact content overlap ≥ 2 hits (UUID-format disposition fallback)
+
+**Sprint 4 增补 (2026-06-12):** Concept-weight rerank added on top of disposition boost — `hermem_search` 主路径生效,基于 L2 场景聚类(L2 scene cluster)计算 query 在概念空间中的权重分布,与 V4.5 disposition 提升串联。详见 `phase3/v6/eval/sprint4-summary.md` §1 任务 4.5 + `phase3/v6/SPEC.md` §3 修订段。
 
 ### V4.4 — Concurrency Fixes (2026-05-21)
 
@@ -529,7 +535,7 @@ Full architectural details (background threads, profile safety, conflict resolut
 | Weekly Synthesis Loop | ✅ launchd plist Sunday 02:30 — L4 + sleep consolidation + active demotion + TTL refresh |
 | Bridge Profile Safety | ✅ All paths via `get_hermes_home()` (no more `Path.home() / ".hermes"` in bridge) |
 | C1/C2 gateway hooks | ⚠️ C3 (session-end) active. C1/C2 defined but awaiting Hermes gateway integration. Non-blocking for V5 active retrieval. |
-| Unit tests | ✅ 156 collected via root pytest (impl + v5.5 tests both discovered) |
+| Unit tests | ✅ 273 collected via root pytest (impl 138 + v5.5 18 + v6 117) |
 | CI/CD | ❌ None |
 
 ---

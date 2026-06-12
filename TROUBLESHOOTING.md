@@ -75,8 +75,8 @@ python3 ~/hermem/phase3/scripts/batch_compute_embeddings.py
 **原因**: 当前对话轮次未达到触发频率（每 3 轮一次）。
 
 **解决**:
-- 正常现象。V5 主动检索每 3 轮才触发一次，不会在每条消息时都注入
-- 继续对话，触发第 3、6、9... 轮时观察
+- 正常现象。**V6 主动检索**由 4-signal trigger 决定(`medium_accumulated` / `anchor` / `temporal` / `intent`),`frequency_fallback`(每 3 轮)是兜底;V5 已升级为 V6,见 `README.md` §V6 `_v6_should_trigger()`
+- 继续对话,触发条件命中或每 3 轮兜底时观察
 
 **另一个原因**: 没有相似度达标的历史 chunk。
 

@@ -174,7 +174,7 @@ hermem/
 | `a77fe30` | Sprint 4 收尾 summary | pushed |
 | `c8d6cde` | 桥层 PR 准备材料(跳过) | pushed |
 | `b51007f` | C 阶段 daily_snapshot.py | pushed |
-| (本文档) | V6 overview | pending |
+| (本文档) | V6 overview | pushed (c779dde) |
 
 **桥层仓库**(hermes-agent,本地):3 commit 累计 +216 -14 行
 - `526c2f64e` Sprint 2 桥层

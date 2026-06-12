@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Hermem is a lightweight memory enhancement system for Hermes Agent, providing L0–L3 hierarchical memory with Predictive Coding (V4) and Active Retrieval (V5).
 
-- **Current versions**: V5.5 v1.0 (2026-05-28, audit-clean 2026-06-01)
-- **Active implementation**: `phase3/impl/` — all V1–V5 code lives here
+- **Current versions**: V5.5 v1.0 (2026-05-28, audit-clean 2026-06-01); **V6 complete** (2026-06-12, 7 sprints + 3 P0 fixes — 5 SPEC §0 goals achieved, baseline Recall@5 38.2%→66.2%)
+- **Active implementation**: `phase3/impl/` (V1–V5) + `phase3/v5.5/impl/` (V5.5) + `phase3/v6/` (V6 — trigger/RRF/predictive/eval)
 - **V5.5 modules**: `phase3/v5.5/impl/` (L4 reflection, conflict resolver, active forgetting, llm_helper)
+- **V6 modules**: `phase3/v6/impl/` (trigger.py, vector_search.py with RRF, predictor.py qwen3.5:4b-no-think, explain.py, reflect.py, eval framework) + `phase3/v6/eval/` (sprint summaries + v6-overview.md)
 - **Hermes Agent plugin / bridge**: lives in a separate repo (`NousResearch/hermes-agent`, at `plugins/memory/hermem/`) — see [Bridge / Plugin Architecture](#bridge--plugin-architecture) below
 - **Requirements**: Ollama (bge-m3:latest) + MiniMax API key + SQLite
 
@@ -32,7 +33,7 @@ hermem/
 │   └── db_init.py         # Database schema initialization
 ├── phase3/scripts/        # Cron-called operational scripts
 │   ├── batch_compute_embeddings.py   # Precompute all chunk vectors
-│   ├── test_v5_e2e.py     # End-to-end test (7/8 passing)
+│   ├── test_v5_e2e.py     # End-to-end test (8/8 passing, verified 2026-06-12)
 │   ├── watchdog_vectorstore.py --fix  # Drift detection + repair
 │   ├── fix_drift_and_fill_embeddings.py
 │   ├── journal.py         # Daily 02:00 — read L0, write patterns/errors
@@ -50,7 +51,11 @@ hermem/
 │   │   └── install_weekly_cron.sh # install/uninstall/run verbs
 │   ├── tests/            # V5.5-specific tests (collected by root pytest)
 │   └── migrate_v55.py    # DB migration for l4_reflections, pending_conflicts, usage columns
-└── plugins/memory/hermem/ # Symlinked wrapper (read-only mirror, see Bridge section below)
+├── phase3/v6/            # V6: trigger + RRF + predictive recall + explain + reflect + eval
+│   ├── impl/             # trigger.py, vector_search.py (RRF k=60), predictor.py (qwen3.5:4b), explain.py, reflect.py, eval/
+│   ├── sprint{1,2,3,4}/TODO.md   # Per-sprint task plan
+│   └── eval/             # sprint{0,05,1,2,3,4}-summary.md + v6-overview.md
+└── ~/.hermes/hermes-agent/plugins/memory/hermem/   # Bridge / plugin entry (lives in separate hermes-agent checkout — see Bridge section below)
 ```
 
 ## Key Data
@@ -59,7 +64,7 @@ hermem/
 |------------|---------|
 | `hermem.db` | chunks, embedding_cache, l4_reflections, pending_conflicts |
 | `l0_l3.db` | l1_dispositions, l2_scenes, l3_staging |
-| `hermem_embeddings.npy` + `.meta.json` | Vector store (1711 vectors, 1645 chunks) |
+| `hermem_embeddings.npy` + `.meta.json` | Vector store (2350 vectors, 2276 chunks as of 2026-06-10 V6 production; 1711/1645 was 2026-05-27 baseline) |
 | `user_profile.md` | L3 confirmed preferences |
 
 ## Commands
