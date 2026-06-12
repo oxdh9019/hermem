@@ -25,7 +25,7 @@
 
 | 标准 | 实际 |
 |---|---|
-| `grep -r "0\.85" Hermem-V5-TODO.md` 仅在"V5.0 旧值"语境 | ✅ 4 处,均带 V5.0 旧值/2026-06-01 调整注释 |
+| `grep -r "0\.85" phase3/v5/TODO.md` 仅在"V5.0 旧值"语境 | ✅ 4 处,均带 V5.0 旧值/2026-06-01 调整注释 |
 | `hermes hermem stats` 可执行,输出 6 指标,无报错 | ✅ 7 指标(多 1 个 merge counter)|
 | `total_chunks` / `embedding_coverage` / `hit_rate_30d` 立即可算 | ✅ 2162 chunks, 99.3% coverage, 0.0% hit(30d 窗口) |
 | `avg_inject_token_7d` 至少 1 次注入后有值 | ⚠️ 首次 inject 后即有值,当前 null + 提示 |
@@ -141,7 +141,7 @@
 - `phase3/v6/archive/v1.0-v1.3-TODO.md` (833 行,旧版任务表)
 
 ### 修改(4)
-- `Hermem-V5-TODO.md`(9 处 0.85/0.65 → 0.70/0.50)
+- `phase3/v5/TODO.md`(9 处 0.85/0.65 → 0.70/0.50)
 - `phase3/impl/l2_aggregate.py`(6 行,+record_merge_attempt)
 - `~/.hermes/hermes-agent/plugins/memory/hermem/__init__.py`(26 行,token log)
 - `~/.hermes/hermes-agent/plugins/memory/hermem/cli.py`(151 行,+stats)

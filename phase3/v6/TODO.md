@@ -18,7 +18,7 @@
 
 | 任务 | 优先级 | 内容 | 涉及文件 | 预估 |
 |---|---|---|---|---|
-| **0.1** | P0 | 同步 `Hermem-V5-TODO.md` 文档阈值(0.85/0.65 → 0.70/0.50),7 处 | `Hermem-V5-TODO.md` | 15 min |
+| **0.1** | P0 | 同步 `phase3/v5/TODO.md` 文档阈值(0.85/0.65 → 0.70/0.50),7 处 | `phase3/v5/TODO.md` | 15 min |
 | **0.2** | P0 | 创建 `hermes memory stats` CLI 子命令(6 指标) | `~/.hermes/hermes-agent/plugins/memory/hermem/cli.py` | 2-3 h |
 | **0.3** | P0 | V5 active retrieval 注入路径加 `avg_inject_token` 日志 | `~/.hermes/hermes-agent/plugins/memory/hermem/__init__.py`(`_v5_inject_chunk`) | 1 h |
 | **0.4** | P1 | 单元测试:stats CLI 各指标计算正确 | `phase3/v6/tests/test_sprint0_stats.py` | 1-2 h |
@@ -52,7 +52,7 @@ grep -n "_v5_inject_chunk\|def _v5_inject" ~/.hermes/hermes-agent/plugins/memory
 #### 0.C 确认 V5-TODO.md 0.85 字面量位置
 
 ```bash
-grep -n "0\.85\|0\.65" ~/.hermes/projects/hermem/Hermem-V5-TODO.md
+grep -n "0\.85\|0\.65" ~/.hermes/projects/hermem/phase3/v5/TODO.md
 ```
 
 **已知 7 处**:
@@ -68,7 +68,7 @@ grep -n "0\.85\|0\.65" ~/.hermes/projects/hermem/Hermem-V5-TODO.md
 
 ### Step 1:同步 V5-TODO 文档(任务 0.1)
 
-**目标**:`Hermem-V5-TODO.md` 不再写已过期的 0.85/0.65 阈值。
+**目标**:`phase3/v5/TODO.md` 不再写已过期的 0.85/0.65 阈值。
 
 | 行号 | 当前 | 改为 |
 |---|---|---|
@@ -83,7 +83,7 @@ grep -n "0\.85\|0\.65" ~/.hermes/projects/hermem/Hermem-V5-TODO.md
 | 826-827 | 同 306-307 重复 | 同 306-307 |
 
 **验收**:
-- `grep -n "0\.85\|0\.65" Hermem-V5-TODO.md` 仅在"已弃用"或"V5.0 旧值"语境
+- `grep -n "0\.85\|0\.65" phase3/v5/TODO.md` 仅在"已弃用"或"V5.0 旧值"语境
 - 实际 `config.py:327` 已为 0.70,文档与代码一致
 
 ---
@@ -361,7 +361,7 @@ metrics["sim_merge_counter_today"] = merge_counter["count"]
 
 ### Sprint 0 验收总表
 
-- [ ] **0.1** `Hermem-V5-TODO.md` 文档同步,0.85/0.65 字面量仅在"V5.0 旧值"语境
+- [ ] **0.1** `phase3/v5/TODO.md` 文档同步,0.85/0.65 字面量仅在"V5.0 旧值"语境
 - [ ] **0.2** `hermes memory stats` CLI 工作正常,6 指标全部可输出(部分可 null)
 - [ ] **0.3** `_v5_inject_chunk` 加 token 日志,不破坏主流程
 - [ ] **0.4** 单元测试全部通过

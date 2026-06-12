@@ -213,7 +213,7 @@ Agent 处理 → 响应
 
 | 任务 | 内容 | 预估 |
 |---|---|---|
-| **0.1** | 同步 `Hermem-V5-TODO.md` 文档阈值(0.85/0.65 → 0.70/0.50),7 处 | 15 min |
+| **0.1** | 同步 `phase3/v5/TODO.md` 文档阈值(0.85/0.65 → 0.70/0.50),7 处 | 15 min |
 | **0.2** | 创建 `hermes memory stats` CLI 子命令(6 指标) | 2-3 h |
 | **0.3** | V5 active retrieval 注入路径加 `avg_inject_token` 日志 → `~/.hermes/memory/hermem_inject_log.jsonl` | 1 h |
 | **0.4** | 单元测试:stats CLI 各指标计算正确 + JSON 输出 + 失败降级 | 1-2 h |
@@ -223,7 +223,7 @@ Agent 处理 → 响应
 - `hermes memory stats` 6 指标可输出(部分可 null,带降级提示)
 - `hermes memory health` 仍 HEALTHY
 - 156/156 pytest 全过
-- `grep -r "0\.85" Hermem-V5-TODO.md` 仅在"V5.0 旧值"语境
+- `grep -r "0\.85" phase3/v5/TODO.md` 仅在"V5.0 旧值"语境
 
 **❌ 任务作废说明**:
 - v1.0 任务 0.1(0.85 fallback 改造)整项作废:文件不存在 + 主路径已修
@@ -340,7 +340,7 @@ Agent 处理 → 响应
 
 ## 4. 验收标准(Sprint 0)
 
-1. `grep -r "0\.85" Hermem-V5-TODO.md` 仅在"V5.0 旧值"语境
+1. `grep -r "0\.85" phase3/v5/TODO.md` 仅在"V5.0 旧值"语境
 2. `hermes memory stats` 可执行,输出 6 指标,无报错
 3. `total_chunks` / `embedding_coverage` / `hit_rate_30d` 基于现有数据可立即算出
 4. `avg_inject_token_7d` 需要至少 1 次主动注入事件后才能有值
