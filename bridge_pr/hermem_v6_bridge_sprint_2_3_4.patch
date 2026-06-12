@@ -1,0 +1,467 @@
+From 526c2f64ef1b1c1cc3edb653475abd67c5386d90 Mon Sep 17 00:00:00 2001
+From: Oliver <oliver@example.com>
+Date: Wed, 10 Jun 2026 22:03:37 +0800
+Subject: [PATCH 1/3] =?UTF-8?q?feat(hermem-bridge):=20add=20hermem=5Fsearc?=
+ =?UTF-8?q?h=5Fpredictive=20tool=20=E2=80=94=20V6=20Sprint=202?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+桥层新增预测性召回工具:
+- HERMEM_SEARCH_PREDICTIVE_SCHEMA:query + top_k 参数,description 说明
+  LLM 调用的延迟特性 + 失败兜底行为
+- _impl_cache[predictor]:在 _ensure_impl 内 lazy import,失败不影响其他工具
+- handle_tool_call 分支:调 impl.predictor.search_predictive,返回
+  high/medium + predictor_used + predictor_metrics
+- 注释同步:__init__.py:1029 方案 A 二分类调用注释从 2b 改 4b
+  (2026-06-10 全面复核:LLM 模型统一规范为 4b)
+
+e2e 验证:tool_call 返回 high 1 + medium 3 chunks,LLM 延迟 1081ms,
+4b 模型 + think=False 正确传递。Sprint 2 实证 5/5 成功。
+
+依赖:phase3/impl/predictor.py(hermem impl repo,feat(V6-Sprint2) commit
+81ebc95 + 复核修订 cbb0bf7 + 全面复核 31d0783)。
+---
+ plugins/memory/hermem/__init__.py | 80 ++++++++++++++++++++++++++++---
+ 1 file changed, 74 insertions(+), 6 deletions(-)
+
+diff --git a/plugins/memory/hermem/__init__.py b/plugins/memory/hermem/__init__.py
+index d834241ca..68129e4e0 100644
+--- a/plugins/memory/hermem/__init__.py
++++ b/plugins/memory/hermem/__init__.py
+@@ -66,6 +66,13 @@ def _ensure_impl():
+         _impl_cache["embedding"] = embedding
+         _impl_cache["vectorstore"] = vectorstore
+         _impl_cache["retrieval"] = retrieval
++        # V6 Sprint 2: predictive recall (predictor 模块)
++        try:
++            from impl import predictor
++            _impl_cache["predictor"] = predictor
++        except ImportError:
++            # predictor 模块尚未落地或路径不对,Sprint 2 之前的 fallback
++            pass
+         _impl_init_done = True
+     except ImportError:
+         _print_setup_guide()
+@@ -135,6 +142,25 @@ HERMEM_SEARCH_SCHEMA = {
+     },
+ }
+ 
++# V6 Sprint 2: predictive recall schema
++HERMEM_SEARCH_PREDICTIVE_SCHEMA = {
++    "name": "hermem_search_predictive",
++    "description": (
++        "Predictive semantic search: combines explicit query with LLM-generated predicted "
++        "queries, fused via RRF. Use when user_query suggests a follow-up need (e.g. 'next step', "
++        "'how to', 'what about X'). Slower (≈1s LLM call) but returns more relevant context. "
++        "Falls back to explicit-only if predictor fails/timed out."
++    ),
++    "parameters": {
++        "type": "object",
++        "properties": {
++            "query": {"type": "string", "description": "Current user query."},
++            "top_k": {"type": "integer", "description": "Max results per tier (default: 3)."},
++        },
++        "required": ["query"],
++    },
++}
++
+ HERMEM_ADD_SCHEMA = {
+     "name": "hermem_add",
+     "description": (
+@@ -253,7 +279,7 @@ class HermemMemoryProvider(MemoryProvider):
+         self._pending_recall_turn_counter = 0  # track turn counter for staleness
+ # V5: Active Retrieval state
+         self._v5_injected_chunk_ids: set = set()  # 会话级去重
+-        self._v5_medium_tracker: dict = {}  # 中置信累积: {chunk_id: max_similarity}
++        self._v5_medium_tracker: dict = {}  # 中置信累积: {chunk_id: {"turns": int, "max_sim": float}} (Sprint 1.5 修)
+         self._v6_last_trigger_source: str = "frequency"  # V6 Sprint 1:当前检索触发来源
+         self._v5_retrieve_count: int = 0  # 消息计数（频率控制）
+         self._v5_chunk_cache: dict = {}  # 本次检索的 chunk 对象缓存，供 medium injection 使用
+@@ -1000,7 +1026,8 @@ class HermemMemoryProvider(MemoryProvider):
+             threading.Thread(target=_medium_check, daemon=True, name="hermem-medium-check").start()
+ 
+         # ── 方案 A: LLM 隐式纠正检测 ─────────────────────────────
+-        # 规则未捕获的隐式纠正（weak/none tier），用 qwen3.5:2b 做二分类。
++        # 规则未捕获的隐式纠正（weak/none tier），用 qwen3.5:4b-no-think 做二分类
++        # (2026-06-10 全面复核:注释原本写 2b,代码实际 4b;统一规范为 4b)。
+         # 包含最近一次 AI 回复作为上下文，提升判断准确率。
+         if tier in ("weak", "none"):
+             recent_assistant = ""
+@@ -1359,6 +1386,7 @@ class HermemMemoryProvider(MemoryProvider):
+             HERMEM_FORGET_SCHEMA,
+             HERMEM_STATS_SCHEMA,
+             HERMEM_RESOLVE_CONFLICT_SCHEMA,
++            HERMEM_SEARCH_PREDICTIVE_SCHEMA,
+         ]
+ 
+     def handle_tool_call(self, tool_name: str, args: Dict[str, Any], **kwargs) -> str:
+@@ -1389,6 +1417,33 @@ class HermemMemoryProvider(MemoryProvider):
+             except Exception as e:
+                 return tool_error(f"hermem_search failed: {e}")
+ 
++        elif tool_name == "hermem_search_predictive":
++            # V6 Sprint 2: predictive recall via qwen3.5:4b-no-think
++            query = args.get("query", "")
++            top_k = int(args.get("top_k", 3))
++            if not query:
++                return tool_error("hermem_search_predictive requires a non-empty 'query' argument.")
++            if "predictor" not in impl:
++                return tool_error(
++                    "hermem_search_predictive unavailable: predictor module not loaded. "
++                    "Hermem V6 Sprint 2 module may not be installed; falling back to hermem_search."
++                )
++            try:
++                predictor = impl["predictor"]
++                high, medium = predictor.search_predictive(
++                    user_query=query,
++                    user_profile="",  # 自动读 ~/.hermes/memory/user_profile*.md
++                    top_k=top_k,
++                )
++                return json.dumps({
++                    "high_confidence": high,
++                    "medium_confidence": medium,
++                    "predictor_used": True,
++                    "predictor_metrics": predictor.get_predictor_metrics(),
++                }, ensure_ascii=False)
++            except Exception as e:
++                return tool_error(f"hermem_search_predictive failed: {e}")
++
+         elif tool_name == "hermem_add":
+             content = args.get("content", "")
+             if not content:
+@@ -1665,9 +1720,11 @@ class HermemMemoryProvider(MemoryProvider):
+             intent_confidence = 1.0  # 降级
+ 
+         # 2) medium_tracker 累积轮数(实现任务 1.2 信号 4)
++        # Sprint 1.5 修复:从 {cid: float} 改为 {cid: {"turns": int, "max_sim": float}},
++        # 透传 turns 给 should_trigger(内部用 turns >= 3 判断)
+         medium_tracker_turns = {
+-            cid: self._v5_medium_tracker.get(cid, 0)
+-            for cid in self._v5_medium_tracker
++            cid: (entry["turns"] if isinstance(entry, dict) else 0)
++            for cid, entry in self._v5_medium_tracker.items()
+         }
+ 
+         # 3) 频率控制
+@@ -1728,14 +1785,25 @@ class HermemMemoryProvider(MemoryProvider):
+                     )
+ 
+             # 处理中置信(累积 + 填充缓存)
++            # Sprint 1.5 修复:同时记录累积轮数(int)+ 最高 rrf 浮点,
++            # 供 should_trigger 信号 4 (medium_accumulated) 真实触发使用
+             for chunk in medium:
+                 cid = chunk["chunk_id"]
+                 rrf = chunk.get("rrf_score", 0.0)
+                 self._v5_chunk_cache[cid] = chunk
+                 if cid in self._v5_medium_tracker:
+-                    self._v5_medium_tracker[cid] = max(self._v5_medium_tracker[cid], rrf)
++                    entry = self._v5_medium_tracker[cid]
++                    # 兼容旧结构(浮点) — 升级到新结构
++                    if isinstance(entry, dict):
++                        entry["turns"] += 1
++                        entry["max_sim"] = max(entry["max_sim"], rrf)
++                    else:
++                        self._v5_medium_tracker[cid] = {
++                            "turns": 2,  # 旧结构有 1 轮浮点,视为累积 1 轮
++                            "max_sim": max(entry, rrf),
++                        }
+                 else:
+-                    self._v5_medium_tracker[cid] = rrf
++                    self._v5_medium_tracker[cid] = {"turns": 1, "max_sim": rrf}
+ 
+             # 检查 medium_tracker 是否有达到注入阈值的
+             self._v5_check_medium_injection()
+-- 
+2.50.1 (Apple Git-155)
+
+
+From 197bd40167b6e7ecd50b17845bf54406a9a7493c Mon Sep 17 00:00:00 2001
+From: Oliver <oliver@example.com>
+Date: Thu, 11 Jun 2026 22:27:18 +0800
+Subject: [PATCH 2/3] fix(hermem-bridge): _ensure_impl add config module to
+ _impl_cache
+
+Bug fix: `_ensure_impl()` imported database/embedding/vectorstore/retrieval
+modules but did NOT register config in `_impl_cache`. Any code path
+calling `impl['config']` (e.g. reading constants) would raise KeyError.
+
+This was latent until the cron prompt alignment work added a feature that
+reads `impl['config'].STATS_SCHEMA_VERSION` from the bridge. Caught at
+2026-06-11 21:38 when hermem_stats() handle_tool_call returned
+`hermem_stats failed: 'config'`.
+
+Fix: import + register config alongside the other modules.
+---
+ plugins/memory/hermem/__init__.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/plugins/memory/hermem/__init__.py b/plugins/memory/hermem/__init__.py
+index 68129e4e0..97e782dde 100644
+--- a/plugins/memory/hermem/__init__.py
++++ b/plugins/memory/hermem/__init__.py
+@@ -54,7 +54,7 @@ def _ensure_impl():
+         sys.path.insert(0, impl_path)
+ 
+     try:
+-        from impl import database, embedding, vectorstore, retrieval
++        from impl import database, embedding, vectorstore, retrieval, config
+         from impl.database import init_db
+         from impl.vectorstore import init_vectorstore
+ 
+@@ -66,6 +66,7 @@ def _ensure_impl():
+         _impl_cache["embedding"] = embedding
+         _impl_cache["vectorstore"] = vectorstore
+         _impl_cache["retrieval"] = retrieval
++        _impl_cache["config"] = config
+         # V6 Sprint 2: predictive recall (predictor 模块)
+         try:
+             from impl import predictor
+-- 
+2.50.1 (Apple Git-155)
+
+
+From d3567f99d5495e348118cd99da9daaf13c4c7790 Mon Sep 17 00:00:00 2001
+From: Oliver <oliver@example.com>
+Date: Thu, 11 Jun 2026 22:27:39 +0800
+Subject: [PATCH 3/3] =?UTF-8?q?feat(hermem-bridge):=20add=20hermem=5Fexpla?=
+ =?UTF-8?q?in=5Fchunk=20+=20hermem=5Freflect=20tools=20=E2=80=94=20V6=20Sp?=
+ =?UTF-8?q?rint=203?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+桥层新增 2 个工具(Sprint 3 解释层 + 反射 API):
+
+- HERMEM_EXPLAIN_CHUNK_SCHEMA:chunk_id + query + use_llm,description 说明
+  默认模板零 LLM 延迟 vs 4b opt-in(≈1-2s)
+- HERMEM_REFLECT_SCHEMA:query + top_k + write_l4 + session_id,description
+  说明 4 路召回 + 4b 综合 + 可选 L4 写(标 source=reflect_immediate)
+- _impl_cache[explain] + _impl_cache[reflect]:在 _ensure_impl 内 lazy import
+  (Sprint 3 之前 fallback)
+- _v5_inject_chunk 改调 explain_chunk() 模板路径(用 chunk_id 作 seed,
+  md5 稳定不抖动),失败降级 V5 旧格式 [自动回忆 - 相似度 X.XX]
+  (V5 medium_tracker 信号 4 不受影响;legacy 方法保留作显式兜底)
+- 桥层 SQL 适配:chunks 表无 similarity 列,explain_chunk similarity 传 0.7
+  (高置信档,因用户主动解释的 chunk 大概率有意义)
+- handle_tool_call 2 个新分支:hermem_explain_chunk + hermem_reflect
+- get_tool_schemas 8 个(原 6 + 新 2)
+
+e2e 验证:hermem_explain_chunk 模板路径返回 1 句话解释;
+hermem_reflect 4 路召回 3 sources,4b 综合答案(冷启超时走兜底不崩)。
+explain 模板路径零 LLM 延迟,use_llm=True 走 4b 3s 监控(决策 8)。
+
+依赖:phase3/impl/{explain,reflect,explain_templates}.py(hermem impl repo,
+commit 86b2c86) + v5.5 l4_reflection.write_reflection_immediate(扩 signature)。
+
+跨仓库:Sprint 2/3 桥层改动全在本地 commit;Sprint 1.5 模式继续
+(NousResearch/hermes-agent 仓库需走 fork + PR 流程,本地 amend
+即可合并所有 Sprint 3 桥层改动为单 commit)。
+---
+ plugins/memory/hermem/__init__.py | 147 ++++++++++++++++++++++++++++--
+ 1 file changed, 140 insertions(+), 7 deletions(-)
+
+diff --git a/plugins/memory/hermem/__init__.py b/plugins/memory/hermem/__init__.py
+index 97e782dde..5f6d33127 100644
+--- a/plugins/memory/hermem/__init__.py
++++ b/plugins/memory/hermem/__init__.py
+@@ -74,6 +74,19 @@ def _ensure_impl():
+         except ImportError:
+             # predictor 模块尚未落地或路径不对,Sprint 2 之前的 fallback
+             pass
++        # V6 Sprint 3: 解释层(explain + explain_templates 模块)
++        try:
++            from impl import explain
++            _impl_cache["explain"] = explain
++        except ImportError:
++            # Sprint 3 之前 / fallback:跳过解释层,_v5_inject_chunk 走 V5 旧格式
++            pass
++        # V6 Sprint 3: 反射 API(reflect 模块)
++        try:
++            from impl import reflect
++            _impl_cache["reflect"] = reflect
++        except ImportError:
++            pass
+         _impl_init_done = True
+     except ImportError:
+         _print_setup_guide()
+@@ -162,6 +175,46 @@ HERMEM_SEARCH_PREDICTIVE_SCHEMA = {
+     },
+ }
+ 
++# V6 Sprint 3: explain_chunk tool (LLM opt-in)
++HERMEM_EXPLAIN_CHUNK_SCHEMA = {
++    "name": "hermem_explain_chunk",
++    "description": (
++        "Explain why a memory chunk was retrieved, in natural language. "
++        "Default: template-based (zero LLM latency). Set use_llm=True for "
++        "4b-generated explanations (≈1-2s, opt-in for high-value chunks only)."
++    ),
++    "parameters": {
++        "type": "object",
++        "properties": {
++            "chunk_id": {"type": "string", "description": "Chunk ID to explain."},
++            "query": {"type": "string", "description": "Current user query (for context)."},
++            "use_llm": {"type": "boolean", "description": "Use 4b for richer explanation (default: false, template only)."},
++        },
++        "required": ["chunk_id", "query"],
++    },
++}
++
++# V6 Sprint 3: reflect API
++HERMEM_REFLECT_SCHEMA = {
++    "name": "hermem_reflect",
++    "description": (
++        "Reflective answer: 4-way recall (temporal + vec + BM25 + RRF) → top-k → "
++        "4b synthesizes an integrated answer. Optional write_l4 to record the answer "
++        "as L4 reflection (source=reflect_immediate). Slower than hermem_search "
++        "(≈1-2s LLM) but produces synthesized multi-chunk answers."
++    ),
++    "parameters": {
++        "type": "object",
++        "properties": {
++            "query": {"type": "string", "description": "User question to reflect on."},
++            "top_k": {"type": "integer", "description": "Recall top-k (default 5)."},
++            "write_l4": {"type": "boolean", "description": "If True, write answer to L4 reflections table (default: false)."},
++            "session_id": {"type": "string", "description": "Session ID for L4 attribution (required if write_l4=true)."},
++        },
++        "required": ["query"],
++    },
++}
++
+ HERMEM_ADD_SCHEMA = {
+     "name": "hermem_add",
+     "description": (
+@@ -1388,6 +1441,8 @@ class HermemMemoryProvider(MemoryProvider):
+             HERMEM_STATS_SCHEMA,
+             HERMEM_RESOLVE_CONFLICT_SCHEMA,
+             HERMEM_SEARCH_PREDICTIVE_SCHEMA,
++            HERMEM_EXPLAIN_CHUNK_SCHEMA,
++            HERMEM_REFLECT_SCHEMA,
+         ]
+ 
+     def handle_tool_call(self, tool_name: str, args: Dict[str, Any], **kwargs) -> str:
+@@ -1445,6 +1500,56 @@ class HermemMemoryProvider(MemoryProvider):
+             except Exception as e:
+                 return tool_error(f"hermem_search_predictive failed: {e}")
+ 
++        elif tool_name == "hermem_explain_chunk":
++            # V6 Sprint 3: explain chunk via templates or 4b (opt-in)
++            chunk_id = args.get("chunk_id", "")
++            query = args.get("query", "")
++            use_llm = bool(args.get("use_llm", False))
++            if not chunk_id or not query:
++                return tool_error("hermem_explain_chunk requires 'chunk_id' and 'query'.")
++            if "explain" not in impl:
++                return tool_error("hermem_explain_chunk unavailable: explain module not loaded.")
++            try:
++                # 查 chunk 详情(chunks 表无 similarity 列,用 None → explain 走"高置信"档)
++                from impl.database import get_db
++                with get_db() as conn:
++                    row = conn.execute(
++                        "SELECT id, content, chunk_type FROM chunks WHERE id = ?",
++                        (chunk_id,),
++                    ).fetchone()
++                if not row:
++                    return tool_error(f"chunk_id {chunk_id} not found")
++                # similarity 在 chunks 表里没有(explain 模板走"中置信"档合理,因为
++                # 用户主动解释的 chunk 大概率是有意义的)
++                chunk_dict = {"id": row[0], "content": row[1]}
++                rendered = impl["explain"].explain_chunk(
++                    chunk=chunk_dict, current_query=query, similarity=0.7,
++                    use_llm=use_llm,
++                )
++                return json.dumps({
++                    "explanation": rendered,
++                    "chunk_id": chunk_id,
++                    "use_llm": use_llm,
++                    "explain_metrics": impl["explain"].get_explain_metrics(),
++                }, ensure_ascii=False)
++            except Exception as e:
++                return tool_error(f"hermem_explain_chunk failed: {e}")
++
++        elif tool_name == "hermem_reflect":
++            # V6 Sprint 3: reflective answer via 4b (4-way recall + synthesis)
++            if "reflect" not in impl:
++                return tool_error("hermem_reflect unavailable: reflect module not loaded.")
++            try:
++                result = impl["reflect"].hermem_reflect(
++                    query=args.get("query", ""),
++                    top_k=int(args.get("top_k", 5)),
++                    write_l4=bool(args.get("write_l4", False)),
++                    session_id=args.get("session_id", ""),
++                )
++                return json.dumps(result, ensure_ascii=False, default=str)
++            except Exception as e:
++                return tool_error(f"hermem_reflect failed: {e}")
++
+         elif tool_name == "hermem_add":
+             content = args.get("content", "")
+             if not content:
+@@ -1499,6 +1604,7 @@ class HermemMemoryProvider(MemoryProvider):
+                 vec_stats = impl["vectorstore"].get_stats()
+                 emb_cache = impl["database"].get_cache_stats()
+                 return json.dumps({
++                    "_schema_version": impl["config"].STATS_SCHEMA_VERSION,
+                     "total_chunks": count,
+                     "ollama_healthy": health.get("healthy", False),
+                     "model_installed": health.get("model_installed", False),
+@@ -1857,21 +1963,48 @@ class HermemMemoryProvider(MemoryProvider):
+             )
+ 
+     def _v5_inject_chunk(self, chunk: dict) -> None:
+-        """将检索到的 chunk 直接注入到 prefetch result。"""
++        """V5 主动注入,V6 Sprint 3 改用 explain_chunk() 输出(模板默认)。
++
++        explain_chunk 失败/未就位 → 降级到 V5 旧格式 `[自动回忆 - 相似度 X.XX]`。
++        """
+         sim = chunk.get("similarity", 0.0)
+         content = chunk["content"]
+-        injection = (
+-            f"\n\n[自动回忆 - 相似度 {sim:.2f}]\n"
+-            f"以下是从历史记忆中检索到的相关内容（可能相关，仅供参考）：\n"
+-            f"- {content}\n"
+-        )
++        chunk_id = chunk.get("id") or chunk.get("chunk_id", "")
++
++        # V6 Sprint 3:优先用 explain_chunk() 模板路径(use_llm=False,零 LLM 延迟)
++        impl = _impl_cache
++        rendered = None
++        if "explain" in impl:
++            try:
++                explain = impl["explain"]
++                rendered = explain.explain_chunk(
++                    chunk=chunk,
++                    current_query=self._last_turn_user_message or "",
++                    similarity=sim,
++                    use_llm=False,  # Sprint 3 默认模板;4b opt-in 由配置控制
++                    seed=f"chunk_{chunk_id}",
++                )
++            except Exception as _e:
++                logger.debug("[Hermem V6 Sprint 3] explain_chunk failed: %s; falling back to V5", _e)
++                rendered = None
++
++        if rendered is None:
++            # 降级:V5 旧格式
++            injection = (
++                f"\n\n[自动回忆 - 相似度 {sim:.2f}]\n"
++                f"以下是从历史记忆中检索到的相关内容（可能相关，仅供参考）：\n"
++                f"- {content}\n"
++            )
++        else:
++            injection = f"\n\n{rendered}\n"
++
+         with self._prefetch_lock:
+             current = self._prefetch_result
+             if current:
+                 self._prefetch_result = current + injection
+             else:
+                 self._prefetch_result = injection
+-        logger.debug("[Hermem V5] injected: sim=%.2f, content=%s",
++        logger.debug("[Hermem V5/V6] injected: sim=%.2f, content=%s",
+                     sim, content[:40])
+ 
+         # V6 Sprint 0 任务 0.3:记录 inject token 估算(喂给 hermem hermem stats)
+-- 
+2.50.1 (Apple Git-155)
+
